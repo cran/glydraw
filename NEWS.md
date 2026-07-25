@@ -1,4 +1,25 @@
+# glydraw 0.7.0
+
+This version of glydraw introduced some `ggplot2` extensions.
+
+## New features
+
+* New `glydraw_style()` stores reusable glycan rendering options for standalone cartoons, grobs, export, ggplot2 layers, guides, and glycan scales. Explicit rendering arguments override the style. (#55)
+* New `geom_glycan()` draws glycan cartoons for individual observations in ggplot2 plots, with support for size, rotation, justification, and cartoon appearance.
+* New `geom_node_glycan()` draws glycan cartoons as nodes in ggraph network plots, with automatic node positioning and filtering support. (#61)
+* New `guide_glycan()` displays glycan cartoons in ggplot2 legends.
+* New `scale_x_glycan()` and `scale_y_glycan()` display glycan cartoons as discrete ggplot2 axis labels.
+* New `hjust_red_end()` and `vjust_red_end()` anchor vertical and horizontal cartoons at their reducing ends in `geom_glycan()`, `scale_x_glycan()`, `scale_y_glycan()`, and `guide_glycan()`. `guide_glycan()` also gains `hjust` and `vjust` parameters. Reducing-end justification is the default for scale and guide cartoons along the axis perpendicular to their drawing orientation; `geom_glycan()` remains centered by default. (#54)
+
+## Minor improvements and bug fixes
+
+* `draw_cartoon()` now places double core Fuc branches on opposite sides of the core GlcNAc when linkage positions are unavailable, keeping both connections visible. (#59, #60)
+* Recognize bisecting GlcNAc from N-glycan topology when linkage information is unavailable, keeping it centered between the two mannose arms. (#58)
+* `draw_cartoon()` now treats generic `dHex` residues as Fuc-like branches, using the same layout and `fuc_orient` behavior as Fuc. (#56)
+
 # glydraw 0.6.3
+
+* First release on CRAN.
 
 # glydraw 0.6.2
 

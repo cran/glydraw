@@ -7,6 +7,8 @@
 
 [![Lifecycle:
 experimental](https://img.shields.io/badge/lifecycle-experimental-orange.svg)](https://lifecycle.r-lib.org/articles/stages.html#experimental)
+[![CRAN
+status](https://www.r-pkg.org/badges/version/glydraw)](https://CRAN.R-project.org/package=glydraw)
 [![R-universe
 version](https://glycoverse.r-universe.dev/glydraw/badges/version)](https://glycoverse.r-universe.dev/glydraw)
 [![R-CMD-check](https://github.com/glycoverse/glydraw/actions/workflows/R-CMD-check.yaml/badge.svg)](https://github.com/glycoverse/glydraw/actions/workflows/R-CMD-check.yaml)
@@ -59,6 +61,8 @@ remotes::install_github("glycoverse/glydraw")
 
 ## Example
 
+### Plot one glycan
+
 ``` r
 library(glydraw)
 
@@ -70,6 +74,48 @@ draw_cartoon(glycan, red_end = "PP-Dol")
 ```
 
 <img src="man/figures/README-unnamed-chunk-2-1.png" width="850" />
+
+### ggplot2 extension
+
+`scale_x_glycan()` and `scale_y_glycan()` can add glycan cartoons to
+standard ggplot2 figures. For example, you can use glycan cartoons as
+labels in a heatmap:
+
+``` r
+library(ggplot2)
+library(glydraw)
+library(tibble)
+
+set.seed(123)
+plot_data <- tibble(
+  `z-score` = rnorm(25),
+  branch = rep(c(
+    "GlcNAc(??-",
+    "Gal(??-?)GlcNAc(??-",
+    "Neu5Ac(??-?)Gal(??-?)GlcNAc(??-",
+    "Neu5Ac(??-?)Gal(??-?)[Fuc(??-?)]GlcNAc(??-",
+    "Gal(??-?)[Fuc(??-?)]GlcNAc(??-"
+  ), 5),
+  sample = rep(paste0("Sample ", 1:5), each = 5)
+)
+
+ggplot(plot_data, aes(branch, sample)) +
+  geom_tile(aes(fill = `z-score`), color = "white", linewidth = 1) +
+  scale_fill_viridis_c(option = "plasma") +
+  scale_x_glycan(
+    position = "top",
+    size = 0.2,
+    show_linkage = FALSE,
+    red_end = "~"
+  ) +
+  coord_equal() +
+  theme_void() +
+  theme(axis.text.y = element_text())
+```
+
+![](man/figures/README-ggplot2-extension-1.png)<!-- -->
+
+### Gallery
 
 ``` r
 glycan <- paste0(
