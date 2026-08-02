@@ -8,15 +8,10 @@ glycanGrob(
   structure,
   ...,
   show_linkage = TRUE,
-  orient = c("H", "V"),
-  fuc_orient = c("flex", "up"),
-  red_end = "",
-  edge_linewidth = 0.8,
-  node_linewidth = 0.8,
-  node_size = 1,
-  colors = NULL,
+  orient = c("left", "right", "up", "down"),
   highlight = NULL,
-  style = NULL
+  style = style_glydraw(),
+  red_end = NULL
 )
 }
 \arguments{
@@ -28,34 +23,8 @@ or a string of any glycan structure text nomenclatures supported by \code{\link[
 \item{show_linkage}{Show glycosidic linkage annotations or not. Default is
 TRUE. Substituent annotations are always shown.}
 
-\item{orient}{The orientation of glycan structure. "H" for horizontal, "V" for vertical.
-Default is "H"}
-
-\item{fuc_orient}{Fuc-like triangle orientation. \code{"flex"} points
-non-reducing Fuc-like residues toward their rendered linkage direction,
-while \code{"up"} draws all Fuc-like triangles pointing upward. Reducing-end
-Fuc-like residues always point upward. Defaults to \code{"flex"}.}
-
-\item{red_end}{Reducing-end annotation. The default \code{""} keeps the current
-reducing-end line. Use \code{"~"} to add a wavy reducing end, or any other
-string to draw that string at the reducing end.}
-
-\item{edge_linewidth}{Numeric scalar controlling the linewidth of linkage
-lines. Defaults to the current value, \code{0.8}.}
-
-\item{node_linewidth}{Numeric scalar controlling the linewidth of node
-borders. Defaults to the current value, \code{0.8}.}
-
-\item{node_size}{Numeric scalar used as a multiplier for the default node
-size. Defaults to \code{1}, which keeps the current size. Linkage annotations
-are moved farther from larger nodes, and are hidden with a warning when
-\code{node_size} is too large to leave enough annotation space. Values larger
-than \code{2} are rejected because residues overlap.}
-
-\item{colors}{Optional named character vector of custom monosaccharide fill
-colors. Names must be supported monosaccharide names, such as \code{"Gal"} or
-\code{"GlcNAc"}. User-provided colors overwrite the default SNFG colors, while
-unprovided monosaccharides keep their default colors. Defaults to \code{NULL}.}
+\item{orient}{Direction in which the glycan extends from its reducing end:
+one of \code{"left"}, \code{"right"}, \code{"up"}, or \code{"down"}. Defaults to \code{"left"}.}
 
 \item{highlight}{An integer vector specifying the node indices to highlight.
 This argument is applicable only when \code{structure} is a \code{\link[glyrepr:glycan_structure]{glyrepr::glycan_structure()}}.
@@ -64,8 +33,13 @@ to the monosaccharides in its printed IUPAC nomenclature.
 For example, given \code{glyrepr::as_glycan_structure("Gal(b1-3)[GlcNAc(b1-6)]GalNAc(a1-")},
 setting \code{highlight = c(1, 3)} will highlight the "Gal" and "GalNAc" nodes.}
 
-\item{style}{A \code{glydraw_style} object that supplies rendering options.
-Explicitly supplied rendering arguments override it.}
+\item{style}{A \code{\link[=style_glydraw]{style_glydraw()}} object that controls the cartoon's visual
+appearance.}
+
+\item{red_end}{Reducing-end annotation. \code{NULL}, the default, uses \code{red_end}
+from \code{style}. A non-\code{NULL} value overrides \code{style$red_end}. Ignored when
+\code{style$red_end_length} is \code{0}. To annotate an amino-acid sequence, tag its
+single glycosite as, for example, \code{"ABC<site>D</site>EFG"}.}
 }
 \value{
 A \code{glycanGrob} object inheriting from \code{\link[grid:grid.grob]{grid::gTree()}}.

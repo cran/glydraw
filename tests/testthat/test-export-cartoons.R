@@ -55,7 +55,7 @@ test_that("export_cartoons forwards custom linewidths", {
     result <- export_cartoons(
       glycans,
       temp_dir,
-      style = glydraw_style(edge_linewidth = 1.1, node_linewidth = 0.3)
+      style = style_glydraw(edge_linewidth = 1.1, node_linewidth = 0.3)
     )
   )
   layers <- ggplot2::ggplot_build(result[[1]])$data
@@ -64,17 +64,36 @@ test_that("export_cartoons forwards custom linewidths", {
   expect_equal(unique(layers[[3]]$linewidth), 0.3)
 })
 
+test_that("export_cartoons red_end overrides its style", {
+  temp_dir <- tempfile()
+  on.exit(unlink(temp_dir, recursive = TRUE), add = TRUE)
+
+  suppressMessages(
+    result <- export_cartoons(
+      "Gal(b1-3)GalNAc(a1-",
+      temp_dir,
+      style = style_glydraw(red_end = "~"),
+      red_end = "Reducing end"
+    )
+  )
+  annotation <- result[[1]]$layers[["geom_text"]]$data$annot
+
+  expect_contains(annotation, '"Reducing end"')
+})
+
 test_that("export_cartoons forwards custom colors", {
   glycans <- "Gal(b1-4)GlcNAc(b1-"
   temp_dir <- tempfile()
   on.exit(unlink(temp_dir, recursive = TRUE), add = TRUE)
   fs::dir_create(temp_dir)
+  colors <- glydraw_colors()
+  colors["glyYellow"] <- "#123456"
 
   suppressMessages(
     result <- export_cartoons(
       glycans,
       temp_dir,
-      style = glydraw_style(colors = c(Gal = "#123456"))
+      style = style_glydraw(colors = colors)
     )
   )
   node_fill <- unique(ggplot2::ggplot_build(result[[1]])$data[[3]]$fill)
@@ -89,7 +108,13 @@ test_that("export_cartoons rejects node_size values that make residues overlap",
   on.exit(unlink(temp_dir, recursive = TRUE), add = TRUE)
 
   expect_error(
-    suppressMessages(export_cartoons(glycans, temp_dir, node_size = 2.1)),
+    suppressMessages(
+      export_cartoons(
+        glycans,
+        temp_dir,
+        style = style_glydraw(node_size = 2.1)
+      )
+    ),
     "`node_size` must be no larger than 2"
   )
 })
@@ -242,4 +267,24 @@ test_that("export_cartoons works with jpeg extension", {
   )
   files <- fs::dir_ls(temp_dir, glob = "*.jpg")
   expect_length(files, 1)
+})
+
+test_that("export_cartoons preserves Greek labels in custom-font PDFs", {
+  skip_if_not(capabilities("cairo"), "Cairo graphics are unavailable.")
+  temp_dir <- tempfile()
+  on.exit(unlink(temp_dir, recursive = TRUE), add = TRUE)
+
+  expect_no_warning(
+    suppressMessages(
+      export_cartoons(
+        "Gal(b1-3)GalNAc(a1-",
+        temp_dir,
+        file_ext = "pdf",
+        style = style_glydraw(font_family = "serif")
+      )
+    )
+  )
+  files <- fs::dir_ls(temp_dir, glob = "*.pdf")
+  expect_length(files, 1)
+  expect_gt(file.size(files), 0)
 })

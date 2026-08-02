@@ -20,13 +20,9 @@ scale_x_glycan(
   nudge_x = 0,
   nudge_y = 0,
   show_linkage = TRUE,
-  red_end = "",
-  fuc_orient = c("flex", "up"),
-  edge_linewidth = 0.8,
-  node_linewidth = 0.8,
-  node_size = 1,
-  colors = NULL,
-  style = NULL
+  style = style_glydraw(),
+  red_end = NULL,
+  orient = NULL
 )
 
 scale_y_glycan(
@@ -44,13 +40,9 @@ scale_y_glycan(
   nudge_x = 0,
   nudge_y = 0,
   show_linkage = TRUE,
-  red_end = "",
-  fuc_orient = c("flex", "up"),
-  edge_linewidth = 0.8,
-  node_linewidth = 0.8,
-  node_size = 1,
-  colors = NULL,
-  style = NULL
+  style = style_glydraw(),
+  red_end = NULL,
+  orient = NULL
 )
 }
 \arguments{
@@ -77,11 +69,15 @@ Defaults to \code{0.4}.}
 \item{angle}{Rotation in degrees applied to each axis-label cartoon,
 independently of the cartoon orientation. Defaults to \code{0}.}
 
-\item{hjust}{Horizontal justification. Vertical x-axis cartoons default to
-\code{\link[=hjust_red_end]{hjust_red_end()}}, while horizontal y-axis cartoons default to \code{1}.}
+\item{hjust}{Horizontal justification. When omitted, cartoons on a top or
+bottom axis with a vertical orientation use \code{\link[=hjust_red_end]{hjust_red_end()}}. Cartoons on
+a left or right axis with a horizontal orientation use \code{1} or \code{0},
+respectively. Other position-orientation combinations use \code{0.5}.}
 
-\item{vjust}{Vertical justification. Vertical x-axis cartoons default to
-\code{0}, while horizontal y-axis cartoons default to \code{\link[=vjust_red_end]{vjust_red_end()}}.}
+\item{vjust}{Vertical justification. When omitted, cartoons on a top or
+bottom axis with a vertical orientation use \code{0}. Cartoons on a left or
+right axis with a horizontal orientation use \code{\link[=vjust_red_end]{vjust_red_end()}}. Other
+position-orientation combinations use \code{0.5}.}
 
 \item{nudge_x}{Horizontal adjustment of each cartoon, in millimetres.
 Positive values move cartoons to the right. When this moves cartoons
@@ -96,23 +92,15 @@ to \code{0}.}
 \item{show_linkage}{Whether to show glycosidic linkage annotations inside
 the cartoons. Defaults to \code{TRUE}.}
 
-\item{red_end}{Reducing-end annotation passed to \code{\link[=glycanGrob]{glycanGrob()}}. Use \code{"~"}
-for a wave, or another string to display that text. Defaults to \code{""}.}
+\item{style}{A \code{\link[=style_glydraw]{style_glydraw()}} object that controls the cartoons' visual
+appearance.}
 
-\item{fuc_orient}{Fuc-like triangle orientation passed to \code{\link[=glycanGrob]{glycanGrob()}}.}
+\item{red_end}{Reducing-end annotation. \code{NULL}, the default, uses \code{red_end}
+from \code{style}. A non-\code{NULL} value overrides \code{style$red_end}.}
 
-\item{edge_linewidth}{Linkage linewidth passed to \code{\link[=glycanGrob]{glycanGrob()}}.}
-
-\item{node_linewidth}{Node-border linewidth passed to \code{\link[=glycanGrob]{glycanGrob()}}.}
-
-\item{node_size}{Node-size multiplier passed to \code{\link[=glycanGrob]{glycanGrob()}}.}
-
-\item{colors}{Optional named character vector of monosaccharide fill colors
-passed to \code{\link[=glycanGrob]{glycanGrob()}}.}
-
-\item{style}{A \code{glydraw_style} object that supplies rendering options. Its
-orientation is ignored because each scale determines the axis direction.
-Explicitly supplied rendering arguments override it.}
+\item{orient}{Glycan drawing orientation. \code{NULL}, the default, selects the
+orientation from the displayed axis position: \code{"up"} for \code{"bottom"} or
+\code{"top"}, \code{"left"} for \code{"left"}, and \code{"right"} for \code{"right"}.}
 }
 \value{
 A ggplot2 discrete position scale.

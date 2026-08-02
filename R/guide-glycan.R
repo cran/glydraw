@@ -11,8 +11,8 @@
 #' @inheritParams ggplot2::guide_legend
 #' @param size Positive scalar that uniformly scales each legend-label cartoon.
 #'   Defaults to `0.4`.
-#' @param orient Glycan drawing orientation, either `"H"` for horizontal or
-#'   `"V"` for vertical. Defaults to `"H"`.
+#' @param orient Direction in which the glycan extends from its reducing end:
+#'   one of `"left"`, `"right"`, `"up"`, or `"down"`. Defaults to `"left"`.
 #' @param hjust Horizontal cartoon justification between `0` and `1`, or
 #'   [hjust_red_end()]. It defaults to `0` for horizontal cartoons and
 #'   [hjust_red_end()] for vertical cartoons.
@@ -21,16 +21,10 @@
 #'   cartoons and `0.5` for vertical cartoons.
 #' @param show_linkage Whether to show glycosidic linkage annotations inside
 #'   the cartoons. Defaults to `TRUE`.
-#' @param red_end Reducing-end annotation passed to [glycanGrob()]. Use `"~"`
-#'   for a wave, or another string to display that text. Defaults to `""`.
-#' @param fuc_orient Fuc-like triangle orientation passed to [glycanGrob()].
-#' @param edge_linewidth Linkage linewidth passed to [glycanGrob()].
-#' @param node_linewidth Node-border linewidth passed to [glycanGrob()].
-#' @param node_size Node-size multiplier passed to [glycanGrob()].
-#' @param colors Optional named character vector of monosaccharide fill colors
-#'   passed to [glycanGrob()].
-#' @param style A `glydraw_style` object that supplies rendering options.
-#'   Explicitly supplied rendering arguments override it.
+#' @param style A [style_glydraw()] object that controls the cartoons' visual
+#'   appearance.
+#' @param red_end Reducing-end annotation. `NULL`, the default, uses `red_end`
+#'   from `style`. A non-`NULL` value overrides `style$red_end`.
 #'
 #' @returns A ggplot2 legend guide that draws glycan cartoons in place of text
 #'   labels.
@@ -66,54 +60,29 @@ guide_glycan <- function(
   reverse = FALSE,
   order = 0,
   size = 0.4,
-  orient = c("H", "V"),
+  orient = c("left", "right", "up", "down"),
   hjust = 0,
   vjust = vjust_red_end(),
   show_linkage = TRUE,
-  red_end = "",
-  fuc_orient = c("flex", "up"),
-  edge_linewidth = 0.8,
-  node_linewidth = 0.8,
-  node_size = 1,
-  colors = NULL,
-  style = NULL
+  style = style_glydraw(),
+  red_end = NULL
 ) {
   hjust_is_missing <- missing(hjust)
   vjust_is_missing <- missing(vjust)
-  style <- .resolve_glydraw_style(
-    style = style,
-    show_linkage = show_linkage,
-    orient = orient,
-    fuc_orient = fuc_orient,
-    red_end = red_end,
-    edge_linewidth = edge_linewidth,
-    node_linewidth = node_linewidth,
-    node_size = node_size,
-    colors = colors,
-    .supplied = c(
-      show_linkage = !missing(show_linkage),
-      orient = !missing(orient),
-      fuc_orient = !missing(fuc_orient),
-      red_end = !missing(red_end),
-      edge_linewidth = !missing(edge_linewidth),
-      node_linewidth = !missing(node_linewidth),
-      node_size = !missing(node_size),
-      colors = !missing(colors)
-    )
-  )
   .validate_output_scale(size)
-  orient <- style$orient
-  if (hjust_is_missing && identical(orient, "V")) {
+  orient <- rlang::arg_match(orient)
+  if (hjust_is_missing && .is_vertical_glycan_orientation(orient)) {
     hjust <- hjust_red_end()
   }
-  if (vjust_is_missing && identical(orient, "V")) {
+  if (vjust_is_missing && .is_vertical_glycan_orientation(orient)) {
     vjust <- 0.5
   }
   .validate_red_end_justification_orientation(hjust, vjust, orient)
   .validate_glycan_justification_scalar(hjust, "hjust")
   .validate_glycan_justification_scalar(vjust, "vjust")
+  red_end <- .resolve_red_end(red_end, style)
   show_linkage <- .resolve_linkage_visibility(
-    style$show_linkage,
+    show_linkage,
     style$node_size
   )
 
@@ -147,11 +116,14 @@ guide_glycan <- function(
     glycan_hjust = hjust,
     glycan_vjust = vjust,
     glycan_show_linkage = show_linkage,
-    glycan_red_end = style$red_end,
+    glycan_red_end = red_end,
+    glycan_red_end_length = style$red_end_length,
+    glycan_red_end_size = style$red_end_size,
     glycan_fuc_orient = style$fuc_orient,
     glycan_edge_linewidth = style$edge_linewidth,
     glycan_node_linewidth = style$node_linewidth,
     glycan_node_size = style$node_size,
+    glycan_font_family = style$font_family,
     glycan_colors = style$colors,
     available_aes = "any",
     name = "legend",
@@ -207,12 +179,17 @@ guide_glycan <- function(
     structure,
     show_linkage = params$glycan_show_linkage,
     orient = params$glycan_orient,
-    red_end = params$glycan_red_end,
-    fuc_orient = params$glycan_fuc_orient,
-    edge_linewidth = params$glycan_edge_linewidth,
-    node_linewidth = params$glycan_node_linewidth,
-    node_size = params$glycan_node_size,
-    colors = params$glycan_colors
+    style = style_glydraw(
+      red_end = params$glycan_red_end,
+      fuc_orient = params$glycan_fuc_orient,
+      edge_linewidth = params$glycan_edge_linewidth,
+      node_linewidth = params$glycan_node_linewidth,
+      node_size = params$glycan_node_size,
+      font_family = params$glycan_font_family,
+      colors = params$glycan_colors,
+      red_end_length = params$glycan_red_end_length,
+      red_end_size = params$glycan_red_end_size
+    )
   )
   grob$name <- "guide.glycan.label"
   grob$glydraw_scale <- params$glycan_size
@@ -397,15 +374,18 @@ GuideGlycan <- ggplot2::ggproto(
     ggplot2::GuideLegend$params,
     list(
       glycan_size = 0.4,
-      glycan_orient = "H",
+      glycan_orient = "left",
       glycan_hjust = 0,
       glycan_vjust = .vjust_red_end,
       glycan_show_linkage = TRUE,
       glycan_red_end = "",
+      glycan_red_end_length = 0.6,
+      glycan_red_end_size = 6,
       glycan_fuc_orient = "flex",
       glycan_edge_linewidth = 0.8,
       glycan_node_linewidth = 0.8,
       glycan_node_size = 1,
+      glycan_font_family = "",
       glycan_colors = character()
     )
   ),

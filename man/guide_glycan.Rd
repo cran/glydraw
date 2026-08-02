@@ -15,17 +15,12 @@ guide_glycan(
   reverse = FALSE,
   order = 0,
   size = 0.4,
-  orient = c("H", "V"),
+  orient = c("left", "right", "up", "down"),
   hjust = 0,
   vjust = vjust_red_end(),
   show_linkage = TRUE,
-  red_end = "",
-  fuc_orient = c("flex", "up"),
-  edge_linewidth = 0.8,
-  node_linewidth = 0.8,
-  node_size = 1,
-  colors = NULL,
-  style = NULL
+  style = style_glydraw(),
+  red_end = NULL
 )
 }
 \arguments{
@@ -65,8 +60,8 @@ If 0 (default), the order is determined by a secret algorithm.}
 \item{size}{Positive scalar that uniformly scales each legend-label cartoon.
 Defaults to \code{0.4}.}
 
-\item{orient}{Glycan drawing orientation, either \code{"H"} for horizontal or
-\code{"V"} for vertical. Defaults to \code{"H"}.}
+\item{orient}{Direction in which the glycan extends from its reducing end:
+one of \code{"left"}, \code{"right"}, \code{"up"}, or \code{"down"}. Defaults to \code{"left"}.}
 
 \item{hjust}{Horizontal cartoon justification between \code{0} and \code{1}, or
 \code{\link[=hjust_red_end]{hjust_red_end()}}. It defaults to \code{0} for horizontal cartoons and
@@ -79,22 +74,11 @@ cartoons and \code{0.5} for vertical cartoons.}
 \item{show_linkage}{Whether to show glycosidic linkage annotations inside
 the cartoons. Defaults to \code{TRUE}.}
 
-\item{red_end}{Reducing-end annotation passed to \code{\link[=glycanGrob]{glycanGrob()}}. Use \code{"~"}
-for a wave, or another string to display that text. Defaults to \code{""}.}
+\item{style}{A \code{\link[=style_glydraw]{style_glydraw()}} object that controls the cartoons' visual
+appearance.}
 
-\item{fuc_orient}{Fuc-like triangle orientation passed to \code{\link[=glycanGrob]{glycanGrob()}}.}
-
-\item{edge_linewidth}{Linkage linewidth passed to \code{\link[=glycanGrob]{glycanGrob()}}.}
-
-\item{node_linewidth}{Node-border linewidth passed to \code{\link[=glycanGrob]{glycanGrob()}}.}
-
-\item{node_size}{Node-size multiplier passed to \code{\link[=glycanGrob]{glycanGrob()}}.}
-
-\item{colors}{Optional named character vector of monosaccharide fill colors
-passed to \code{\link[=glycanGrob]{glycanGrob()}}.}
-
-\item{style}{A \code{glydraw_style} object that supplies rendering options.
-Explicitly supplied rendering arguments override it.}
+\item{red_end}{Reducing-end annotation. \code{NULL}, the default, uses \code{red_end}
+from \code{style}. A non-\code{NULL} value overrides \code{style$red_end}.}
 }
 \value{
 A ggplot2 legend guide that draws glycan cartoons in place of text

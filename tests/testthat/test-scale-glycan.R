@@ -167,12 +167,124 @@ test_that("glycan axis scales adapt their configuration to coord_flip", {
   x_label <- .axis_glycan_labels(x_plot, "axis-l")$children[[1]]
   y_label <- .axis_glycan_labels(y_plot, "axis-b")$children[[1]]
 
+  expect_equal(x_label$glydraw_orient, "left")
+  expect_equal(y_label$glydraw_orient, "up")
   expect_false(x_label$glydraw_axis_vertical)
   expect_equal(x_label$glydraw_hjust, 1)
   expect_equal(x_label$glydraw_vjust, vjust_red_end())
   expect_true(y_label$glydraw_axis_vertical)
   expect_equal(y_label$glydraw_hjust, hjust_red_end())
   expect_equal(y_label$glydraw_vjust, 0)
+})
+
+test_that("glycan axis orientation follows position and can be overridden", {
+  data <- data.frame(
+    structure = "Gal(b1-3)GalNAc(a1-",
+    value = 1
+  )
+  x_plot <- function(position = "bottom", orient = NULL) {
+    ggplot2::ggplot(
+      data,
+      ggplot2::aes(x = .data$structure, y = .data$value)
+    ) +
+      ggplot2::geom_col() +
+      scale_x_glycan(position = position, orient = orient)
+  }
+  y_plot <- function(position = "left", orient = NULL) {
+    ggplot2::ggplot(
+      data,
+      ggplot2::aes(x = .data$value, y = .data$structure)
+    ) +
+      ggplot2::geom_col() +
+      scale_y_glycan(position = position, orient = orient)
+  }
+
+  expect_equal(
+    .axis_glycan_labels(x_plot(), "axis-b")$children[[1]]$glydraw_orient,
+    "up"
+  )
+  expect_equal(
+    .axis_glycan_labels(x_plot("top"), "axis-t")$children[[1]]$glydraw_orient,
+    "up"
+  )
+  expect_equal(
+    .axis_glycan_labels(y_plot(), "axis-l")$children[[1]]$glydraw_orient,
+    "left"
+  )
+  expect_equal(
+    .axis_glycan_labels(y_plot("right"), "axis-r")$children[[1]]$glydraw_orient,
+    "right"
+  )
+  expect_equal(
+    .axis_glycan_labels(
+      x_plot(orient = "down"),
+      "axis-b"
+    )$children[[1]]$glydraw_orient,
+    "down"
+  )
+  expect_equal(
+    .axis_glycan_labels(
+      y_plot(orient = "right"),
+      "axis-l"
+    )$children[[1]]$glydraw_orient,
+    "right"
+  )
+})
+
+test_that("glycan axis justification defaults follow side and orientation", {
+  data <- data.frame(
+    structure = "Gal(b1-3)GalNAc(a1-",
+    value = 1
+  )
+  x_label <- function(position = "bottom", orient = NULL, flip = FALSE, ...) {
+    plot <- ggplot2::ggplot(
+      data,
+      ggplot2::aes(x = .data$structure, y = .data$value)
+    ) +
+      ggplot2::geom_col() +
+      scale_x_glycan(position = position, orient = orient, ...)
+    axis_name <- if (flip) "axis-l" else paste0("axis-", substr(position, 1, 1))
+    if (flip) {
+      plot <- plot + ggplot2::coord_flip()
+    }
+    .axis_glycan_labels(plot, axis_name)$children[[1]]
+  }
+  y_label <- function(position = "left", orient = NULL, ...) {
+    plot <- ggplot2::ggplot(
+      data,
+      ggplot2::aes(x = .data$value, y = .data$structure)
+    ) +
+      ggplot2::geom_col() +
+      scale_y_glycan(position = position, orient = orient, ...)
+    axis_name <- paste0("axis-", substr(position, 1, 1))
+    .axis_glycan_labels(plot, axis_name)$children[[1]]
+  }
+
+  bottom <- x_label(orient = "down")
+  top <- x_label(position = "top", orient = "down")
+  left <- y_label(orient = "right")
+  right <- y_label(position = "right", orient = "left")
+  x_unusual <- x_label(orient = "left")
+  y_unusual <- y_label(orient = "up")
+  flipped_unusual <- x_label(orient = "up", flip = TRUE)
+  partial_override <- y_label(orient = "up", hjust = 0.25)
+
+  expect_equal(bottom$glydraw_hjust, hjust_red_end())
+  expect_equal(bottom$glydraw_vjust, 0)
+  expect_equal(top$glydraw_hjust, hjust_red_end())
+  expect_equal(top$glydraw_vjust, 0)
+  expect_equal(left$glydraw_hjust, 1)
+  expect_equal(left$glydraw_vjust, vjust_red_end())
+  expect_equal(right$glydraw_hjust, 0)
+  expect_equal(right$glydraw_vjust, vjust_red_end())
+  expect_equal(x_unusual$glydraw_hjust, 0.5)
+  expect_equal(x_unusual$glydraw_vjust, 0.5)
+  expect_equal(y_unusual$glydraw_hjust, 0.5)
+  expect_equal(y_unusual$glydraw_vjust, 0.5)
+  expect_equal(flipped_unusual$glydraw_hjust, 0.5)
+  expect_equal(flipped_unusual$glydraw_vjust, 0.5)
+  expect_equal(partial_override$glydraw_hjust, 0.25)
+  expect_equal(partial_override$glydraw_vjust, 0.5)
 })
 
 test_that("glycan axis alignment can be adjusted", {
@@ -442,15 +554,23 @@ test_that("glycan axis labels support reducing-end annotations", {
     ggplot2::aes(x = .data$structure, y = .data$value)
   ) +
     ggplot2::geom_col() +
-    scale_x_glycan(red_end = "~")
+    scale_x_glycan(style = style_glydraw(red_end = "~"))
   y_plot <- ggplot2::ggplot(
     data,
     ggplot2::aes(x = .data$value, y = .data$structure)
   ) +
     ggplot2::geom_col() +
-    scale_y_glycan(red_end = "Reducing end")
+    scale_y_glycan(style = style_glydraw(red_end = "Reducing end"))
+  zero_length_plot <- ggplot2::ggplot(
+    data,
+    ggplot2::aes(x = .data$structure, y = .data$value)
+  ) +
+    ggplot2::geom_col() +
+    scale_x_glycan(style = style_glydraw(red_end_length = 0))
   x_label <- .axis_glycan_labels(x_plot, "axis-b")$children[[1]]
   y_label <- .axis_glycan_labels(y_plot, "axis-l")$children[[1]]
+  zero_length_label <-
+    .axis_glycan_labels(zero_length_plot, "axis-b")$children[[1]]
 
   expect_gt(nrow(x_label$annotation_data$reducing_info$wave), 0)
   expect_true(any(
@@ -459,6 +579,61 @@ test_that("glycan axis labels support reducing-end annotations", {
   expect_match(
     y_label$annotation_data$reducing_info$annotation$annot[[2]],
     "Reducing end"
+  )
+  expect_equal(
+    vapply(
+      zero_length_label$annotation_data$reducing_info,
+      nrow,
+      integer(1)
+    ),
+    c(annotation = 1L, segment = 0L, wave = 0L, bounds = 0L)
+  )
+})
+
+test_that("glycan scales red_end overrides their styles", {
+  style <- style_glydraw(red_end = "~")
+
+  expect_identical(
+    scale_x_glycan(style = style)$guide$params$glycan_red_end,
+    "~"
+  )
+  expect_identical(
+    scale_x_glycan(
+      style = style,
+      red_end = "Reducing end"
+    )$guide$params$glycan_red_end,
+    "Reducing end"
+  )
+  expect_identical(
+    scale_y_glycan(
+      style = style,
+      red_end = "Reducing end"
+    )$guide$params$glycan_red_end,
+    "Reducing end"
+  )
+  expect_equal(
+    scale_x_glycan(
+      style = style_glydraw(red_end_length = 1.25)
+    )$guide$params$glycan_red_end_length,
+    1.25
+  )
+  expect_equal(
+    scale_y_glycan(
+      style = style_glydraw(red_end_length = 1.25)
+    )$guide$params$glycan_red_end_length,
+    1.25
+  )
+  expect_equal(
+    scale_x_glycan(
+      style = style_glydraw(red_end_size = 9)
+    )$guide$params$glycan_red_end_size,
+    9
+  )
+  expect_equal(
+    scale_y_glycan(
+      style = style_glydraw(red_end_size = 9)
+    )$guide$params$glycan_red_end_size,
+    9
   )
 })
 
@@ -474,7 +649,8 @@ test_that("glycan axis scales use plain cartoon parameters", {
     ggplot2::geom_col() +
     scale_x_glycan(
       size = 0.6,
-      style = glydraw_style(show_linkage = TRUE, edge_linewidth = 1.1)
+      show_linkage = TRUE,
+      style = style_glydraw(edge_linewidth = 1.1)
     )
   label <- .axis_glycan_labels(plot, "axis-b")$children[[1]]
 

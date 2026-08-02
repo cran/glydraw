@@ -11,6 +11,8 @@
 #'   child-side linkage label.
 #' @param par_offset Numeric distance from the parent residue center to the
 #'   parent-side linkage label.
+#' @param chil_perpendicular_nudge Numeric distance to move the child-side
+#'   label perpendicular to and away from the linkage segment.
 #' @param node_size Numeric node-size multiplier used to push labels along the
 #'   linkage segment away from scaled residue polygons.
 #'
@@ -25,6 +27,7 @@
   par_glyy,
   chil_offset = 0.4,
   par_offset = 0.4,
+  chil_perpendicular_nudge = 0,
   node_size = 1
 ) {
   chil_direction <- matrix(
@@ -64,7 +67,12 @@
   )
   chil_annot_loc <- chil_rotate_matrix %*% chil_location
   par_annot_loc <- par_rotate_matrix %*% par_location
-  extra_offset <- .annotation_extra_offset(node_size)
+  chil_annot_loc <- .nudge_child_label_perpendicular(
+    label_offset = chil_annot_loc,
+    direction = chil_direction,
+    nudge = chil_perpendicular_nudge
+  )
+  extra_offset <- .linkage_annotation_extra_offset(node_size)
   chil_annot_loc <- .push_label_position_along_segment(
     label_offset = chil_annot_loc,
     anchor = c(x = chil_glyx, y = chil_glyy),
@@ -81,6 +89,53 @@
   return(annot_loc)
 }
 
+.beta_annotation_perpendicular_nudge <- 0.025
+
+#' Resolve the perpendicular nudge for a beta linkage label
+#'
+#' @param label A child-side linkage label.
+#' @param child_x,parent_x Numeric horizontal coordinates of the child and
+#'   parent residues.
+#'
+#' @returns The beta nudge for a non-vertical linkage, otherwise zero.
+#' @noRd
+.beta_perpendicular_nudge_for_linkage <- function(
+  label,
+  child_x,
+  parent_x
+) {
+  is_beta <- .normalize_linkage_labels(label) == "beta"
+  is_vertical <- isTRUE(all.equal(child_x, parent_x))
+  if (is_beta && !is_vertical) {
+    return(.beta_annotation_perpendicular_nudge)
+  }
+  0
+}
+
+#' Nudge a child-side label perpendicular to its linkage segment
+#'
+#' @param label_offset A two-row matrix giving the current label offset from
+#'   the child residue.
+#' @param direction A two-row matrix pointing from the child residue to the
+#'   parent residue.
+#' @param nudge Numeric perpendicular distance to add.
+#'
+#' @returns A two-row matrix with the adjusted label offset.
+#' @noRd
+.nudge_child_label_perpendicular <- function(
+  label_offset,
+  direction,
+  nudge
+) {
+  direction_norm <- norm(direction, type = "2")
+  if (nudge <= 0 || direction_norm <= .Machine$double.eps) {
+    return(label_offset)
+  }
+
+  clockwise_normal <- matrix(c(direction[[2]], -direction[[1]]), ncol = 1)
+  label_offset + nudge * clockwise_normal / direction_norm
+}
+
 #' Calculate the extra annotation clearance for scaled nodes
 #'
 #' @param node_size Numeric node-size multiplier.
@@ -89,6 +144,21 @@
 #' @noRd
 .annotation_extra_offset <- function(node_size) {
   .default_node_point_size * pmax(node_size - 1, 0)
+}
+
+#' Calculate the inward shift for linkage labels beside scaled nodes
+#'
+#' The extra node radius reduces three clearances along a linkage: the two
+#' node-to-label gaps and the gap between the labels. Shifting each label by
+#' one-third of the extra radius distributes that reduction evenly instead of
+#' concentrating it between the labels.
+#'
+#' @param node_size Numeric node-size multiplier.
+#'
+#' @returns A non-negative numeric scalar.
+#' @noRd
+.linkage_annotation_extra_offset <- function(node_size) {
+  .annotation_extra_offset(node_size) / 3
 }
 
 #' Push a linkage label offset along its linkage segment
@@ -131,7 +201,8 @@
 #'   of the linkage.
 #' @param role Either `"child"` or `"parent"`, naming which side of the linkage
 #'   the label belongs to.
-#' @param orient Drawing orientation, either `"H"` or `"V"`.
+#' @param orient Drawing orientation, one of `"left"`, `"right"`, `"up"`, or
+#'   `"down"`.
 #'
 #' @returns A numeric scalar offset distance from the anchor residue center.
 #' @noRd
@@ -143,7 +214,7 @@
   other_x,
   other_y,
   role = c("child", "parent"),
-  orient = c("H", "V")
+  orient = c("left", "right", "up", "down")
 ) {
   role <- rlang::arg_match(role)
   orient <- rlang::arg_match(orient)
@@ -175,7 +246,8 @@
 #'   of the linkage.
 #' @param role Either `"child"` or `"parent"`, naming which side of the linkage
 #'   the label belongs to.
-#' @param orient Drawing orientation, either `"H"` or `"V"`.
+#' @param orient Drawing orientation, one of `"left"`, `"right"`, `"up"`, or
+#'   `"down"`.
 #'
 #' @returns A logical scalar.
 #' @noRd
@@ -187,17 +259,22 @@
   role,
   orient
 ) {
-  if (orient == "H") {
-    if (role == "child") {
-      return(other_x > anchor_x && other_y < anchor_y)
-    }
-    return(other_x < anchor_x && other_y < anchor_y)
-  }
+  coor <- matrix(
+    c(anchor_x, anchor_y, other_x, other_y),
+    ncol = 2,
+    byrow = TRUE,
+    dimnames = list(c("anchor", "other"), c("x", "y"))
+  ) |>
+    .cartoon_coordinates_as_left(orient)
+  anchor_x <- coor["anchor", "x"]
+  anchor_y <- coor["anchor", "y"]
+  other_x <- coor["other", "x"]
+  other_y <- coor["other", "y"]
 
   if (role == "child") {
-    return(other_x < anchor_x && other_y < anchor_y)
+    return(other_x > anchor_x && other_y < anchor_y)
   }
-  other_x < anchor_x && other_y > anchor_y
+  other_x < anchor_x && other_y < anchor_y
 }
 
 #' Build linkage annotation rows for every glycosidic edge
@@ -207,7 +284,8 @@
 #'   per graph vertex.
 #' @param node_size Numeric node-size multiplier used to keep labels outside
 #'   scaled residue polygons.
-#' @param orient Drawing orientation, either `"H"` or `"V"`.
+#' @param orient Drawing orientation, one of `"left"`, `"right"`, `"up"`, or
+#'   `"down"`.
 #'
 #' @returns A data frame with one or two rows per edge and columns `vertice`,
 #'   `annot`, `x`, `y`, `segment_start_x`, `segment_start_y`, `segment_end_x`,
@@ -218,25 +296,72 @@
   structure,
   coor,
   node_size = 1,
-  orient = c("H", "V")
+  orient = c("left", "right", "up", "down")
 ) {
   if (igraph::ecount(structure) == 0) {
     return(.empty_linkage_annotation_data())
   }
   orient <- rlang::arg_match(orient)
 
-  annotation <- purrr::map_dfr(
-    seq_len(length(structure) - 1),
-    \(ver) {
-      .linkage_annotation_rows(
-        structure,
-        coor,
-        ver,
-        node_size = node_size,
-        orient = orient
-      )
-    }
+  child_vertices <- seq_len(length(structure) - 1)
+  parent_vertices <- .parent_vertices_for_annotations(structure)
+  linkage_labels <- strsplit(
+    igraph::E(structure)$linkage[child_vertices],
+    "-",
+    fixed = TRUE
   )
+  row_count <- 2L * length(child_vertices)
+  annotation <- data.frame(
+    vertice = rep(as.character(child_vertices), each = 2L),
+    annot = character(row_count),
+    x = numeric(row_count),
+    y = numeric(row_count),
+    segment_start_x = numeric(row_count),
+    segment_start_y = numeric(row_count),
+    segment_end_x = numeric(row_count),
+    segment_end_y = numeric(row_count),
+    stringsAsFactors = FALSE
+  )
+
+  for (ver in child_vertices) {
+    par_ver <- parent_vertices[[ver]]
+    offsets <- .linkage_label_offsets(
+      structure,
+      coor,
+      child_ver = ver,
+      parent_ver = par_ver,
+      orient = orient
+    )
+    label_positions <- .linkage_label_positions(
+      coor[ver, "x"],
+      coor[ver, "y"],
+      coor[par_ver, "x"],
+      coor[par_ver, "y"],
+      chil_offset = offsets[["child"]],
+      par_offset = offsets[["parent"]],
+      chil_perpendicular_nudge = .beta_perpendicular_nudge_for_linkage(
+        linkage_labels[[ver]][[1]],
+        coor[ver, "x"],
+        coor[par_ver, "x"]
+      ),
+      node_size = node_size
+    )
+    rows <- 2L * ver - c(1L, 0L)
+    annotation$annot[rows] <- linkage_labels[[ver]][1:2]
+    annotation$x[rows] <- c(
+      label_positions$chil[[1]] + coor[ver, "x"],
+      label_positions$par[[1]] + coor[par_ver, "x"]
+    )
+    annotation$y[rows] <- c(
+      label_positions$chil[[2]] + coor[ver, "y"],
+      label_positions$par[[2]] + coor[par_ver, "y"]
+    )
+    annotation$segment_start_x[rows] <- coor[ver, "x"]
+    annotation$segment_start_y[rows] <- coor[ver, "y"]
+    annotation$segment_end_x[rows] <- coor[par_ver, "x"]
+    annotation$segment_end_y[rows] <- coor[par_ver, "y"]
+  }
+
   annotation$annot <- .normalize_linkage_labels(annotation$annot)
   annotation
 }
@@ -269,7 +394,8 @@
 #' @param ver A single integer child vertex index.
 #' @param node_size Numeric node-size multiplier used to keep labels outside
 #'   scaled residue polygons.
-#' @param orient Drawing orientation, either `"H"` or `"V"`.
+#' @param orient Drawing orientation, one of `"left"`, `"right"`, `"up"`, or
+#'   `"down"`.
 #'
 #' @returns A two-row data frame with linkage annotation columns. The first row
 #'   is the child-side anomer label and the second row is the parent-side
@@ -280,7 +406,7 @@
   coor,
   ver,
   node_size = 1,
-  orient = c("H", "V")
+  orient = c("left", "right", "up", "down")
 ) {
   orient <- rlang::arg_match(orient)
   par_ver <- .parent_vertex_for_annotation(structure, ver)
@@ -299,6 +425,11 @@
     coor[par_ver, "y"],
     chil_offset = offsets[["child"]],
     par_offset = offsets[["parent"]],
+    chil_perpendicular_nudge = .beta_perpendicular_nudge_for_linkage(
+      labels[[1]],
+      coor[ver, "x"],
+      coor[par_ver, "x"]
+    ),
     node_size = node_size
   )
 
@@ -339,6 +470,24 @@
   )
 }
 
+#' Find parent vertices used for all linkage annotations
+#'
+#' @param structure An igraph glycan graph.
+#'
+#' @returns An integer vector with one parent vertex for each non-reducing
+#'   vertex, ordered by child vertex index.
+#' @noRd
+.parent_vertices_for_annotations <- function(structure) {
+  traversal <- igraph::bfs(
+    structure,
+    root = length(structure),
+    mode = "all",
+    unreachable = FALSE,
+    parent = TRUE
+  )
+  as.integer(traversal$parent[seq_len(length(structure) - 1)])
+}
+
 #' Calculate child-side and parent-side linkage label offsets
 #'
 #' @param structure An igraph glycan graph whose vertices include `mono`.
@@ -346,7 +495,8 @@
 #'   per graph vertex.
 #' @param child_ver A single integer child vertex index.
 #' @param parent_ver A single integer parent vertex index.
-#' @param orient Drawing orientation, either `"H"` or `"V"`.
+#' @param orient Drawing orientation, one of `"left"`, `"right"`, `"up"`, or
+#'   `"down"`.
 #'
 #' @returns A named numeric vector with values `child` and `parent`, giving the
 #'   distance from each residue center to its label.
@@ -356,7 +506,7 @@
   coor,
   child_ver,
   parent_ver,
-  orient = c("H", "V")
+  orient = c("left", "right", "up", "down")
 ) {
   orient <- rlang::arg_match(orient)
   c(
@@ -468,17 +618,29 @@
 #' Find the shortest distance among annotation coordinates
 #'
 #' @param coords A numeric matrix with columns `x` and `y`.
+#' @param group_keys A character vector mapping rows to linkage groups.
+#'   Distances within the same non-missing group are ignored.
 #'
 #' @returns A numeric scalar minimum pairwise Euclidean distance among complete
-#'   rows. Returns `Inf` when fewer than two complete rows are available.
+#'   rows from different groups. Returns `Inf` when fewer than two eligible rows
+#'   are available.
 #' @noRd
-.minimum_annotation_distance <- function(coords) {
+.minimum_annotation_distance <- function(
+  coords,
+  group_keys = rep(NA_character_, nrow(coords))
+) {
   finite <- stats::complete.cases(coords)
   if (sum(finite) < 2) {
     return(Inf)
   }
 
-  min(stats::dist(coords[finite, , drop = FALSE]))
+  distances <- as.matrix(stats::dist(coords[finite, , drop = FALSE]))
+  finite_groups <- group_keys[finite]
+  same_group <- outer(finite_groups, finite_groups, "==")
+  same_group[is.na(same_group)] <- FALSE
+  distances[same_group] <- Inf
+  diag(distances) <- Inf
+  min(distances)
 }
 
 #' Check whether two annotation rows are sufficiently separated
@@ -590,7 +752,7 @@
       candidate_coords <- coords
       rows <- groups$rows[[candidate]]
       candidate_coords[rows, ] <- reflected_coords[rows, ]
-      .minimum_annotation_distance(candidate_coords)
+      .minimum_annotation_distance(candidate_coords, groups$keys)
     }
   )
 
@@ -699,6 +861,12 @@
   for (pair in seq_len(nrow(pairs))) {
     i <- pairs$i[pair]
     j <- pairs$j[pair]
+    same_group <- !is.na(groups$keys[[i]]) &&
+      !is.na(groups$keys[[j]]) &&
+      groups$keys[[i]] == groups$keys[[j]]
+    if (same_group) {
+      next
+    }
     if (.annotations_are_separated(coords, i, j, min_distance)) {
       next
     }
@@ -837,7 +1005,8 @@
 #' @param structure An igraph glycan graph whose vertices may include `sub`.
 #' @param coor A numeric coordinate matrix with columns `x` and `y`, one row
 #'   per graph vertex.
-#' @param orient Drawing orientation, either `"H"` or `"V"`.
+#' @param orient Drawing orientation, one of `"left"`, `"right"`, `"up"`, or
+#'   `"down"`.
 #' @param node_size Numeric node-size multiplier used to keep labels outside
 #'   scaled residue polygons.
 #'
@@ -878,10 +1047,23 @@
   }
 
   offset_distance <- .scaled_annotation_offset(0.28, node_size)
-  offset <- if (orient == "H") {
-    c(x = 0, y = offset_distance)
+  offset <- .rotate_cartoon_vector(
+    c(x = 0, y = offset_distance),
+    orient
+  )
+  hjust <- if (offset[["x"]] > 0) {
+    0
+  } else if (offset[["x"]] < 0) {
+    1
   } else {
-    c(x = offset_distance, y = 0)
+    0.5
+  }
+  vjust <- if (offset[["y"]] > 0) {
+    0
+  } else if (offset[["y"]] < 0) {
+    1
+  } else {
+    0.5
   }
 
   data.frame(
@@ -889,8 +1071,8 @@
     annot = sub("^\\?+", "", sub[sub_pos]),
     x = as.numeric(coor[sub_pos, "x"] + offset["x"]),
     y = as.numeric(coor[sub_pos, "y"] + offset["y"]),
-    hjust = if (orient == "H") 0.5 else 0,
-    vjust = if (orient == "H") 0 else 0.5,
+    hjust = hjust,
+    vjust = vjust,
     stringsAsFactors = FALSE
   )
 }
@@ -899,27 +1081,27 @@
 #'
 #' @param annotation A substituent annotation data frame returned by
 #'   `.substituent_annotation_data()`.
-#' @param orient Drawing orientation, either `"H"` or `"V"`.
+#' @param orient Drawing orientation, one of `"left"`, `"right"`, `"up"`, or
+#'   `"down"`.
 #'
 #' @returns A data frame with numeric columns `x` and `y`. Horizontal labels
 #'   return top bound points; vertical labels return right-side bound points.
 #' @noRd
-.substituent_annotation_bounds <- function(annotation, orient = c("H", "V")) {
+.substituent_annotation_bounds <- function(
+  annotation,
+  orient = c("left", "right", "up", "down")
+) {
   orient <- rlang::arg_match(orient)
   if (nrow(annotation) == 0) {
     return(data.frame(x = numeric(0), y = numeric(0)))
   }
 
-  if (orient == "H") {
-    return(data.frame(
-      x = annotation$x,
-      y = annotation$y + .substituent_label_height(annotation$annot)
-    ))
-  }
-
+  direction <- .rotate_cartoon_vector(c(x = 0, y = 1), orient)
   data.frame(
-    x = annotation$x + .substituent_label_width(annotation$annot),
-    y = annotation$y
+    x = annotation$x +
+      direction[["x"]] * .substituent_label_width(annotation$annot),
+    y = annotation$y +
+      direction[["y"]] * .substituent_label_height(annotation$annot)
   )
 }
 
@@ -964,7 +1146,264 @@
 #'   wrapped in double quotes and embedded quotes escaped.
 #' @noRd
 .quote_plotmath_text <- function(annot) {
-  paste0('"', gsub('"', '\\"', annot, fixed = TRUE), '"')
+  encodeString(annot, quote = '"')
+}
+
+# Recover plain text previously stored for plotmath parsing.
+.unquote_plotmath_text <- function(annot) {
+  quoted <- !is.na(annot) &
+    startsWith(annot, '"') &
+    endsWith(annot, '"') &
+    nchar(annot) >= 2L
+  annot[quoted] <- substr(annot[quoted], 2L, nchar(annot[quoted]) - 1L)
+  annot[quoted] <- gsub('\\"', '"', annot[quoted], fixed = TRUE)
+  annot[quoted] <- gsub("\\\\", "\\", annot[quoted], fixed = TRUE)
+  annot
+}
+
+#' Parse a tagged reducing-end amino-acid sequence
+#'
+#' @param red_end A reducing-end annotation string.
+#'
+#' @returns `NULL` when `red_end` is ordinary custom text, otherwise a named
+#'   list containing `prefix`, `site`, and `suffix`.
+#' @noRd
+.parse_reducing_end_aa_sequence <- function(red_end) {
+  open_tag <- "<site>"
+  close_tag <- "</site>"
+  has_site_tag <- grepl(open_tag, red_end, fixed = TRUE) ||
+    grepl(close_tag, red_end, fixed = TRUE)
+  if (!has_site_tag) {
+    return(NULL)
+  }
+
+  open_position <- gregexpr(open_tag, red_end, fixed = TRUE)[[1]]
+  close_position <- gregexpr(close_tag, red_end, fixed = TRUE)[[1]]
+  has_one_tag_pair <- length(open_position) == 1L &&
+    open_position != -1L &&
+    length(close_position) == 1L &&
+    close_position != -1L &&
+    open_position < close_position
+  if (has_one_tag_pair) {
+    site_start <- open_position + nchar(open_tag)
+    site <- substr(red_end, site_start, close_position - 1L)
+  }
+  if (!has_one_tag_pair || nchar(site, type = "chars") != 1L) {
+    cli::cli_abort(c(
+      "{.arg red_end} has an invalid amino-acid site annotation.",
+      "i" = paste(
+        "Use one {.code <site></site>} pair containing exactly one",
+        "character, for example {.code ABC<site>D</site>EFG}."
+      )
+    ))
+  }
+
+  prefix <- substr(red_end, 1L, open_position - 1L)
+  suffix_start <- close_position + nchar(close_tag)
+  suffix <- substr(red_end, suffix_start, nchar(red_end))
+  list(prefix = prefix, site = site, suffix = suffix)
+}
+
+#' Format a tagged amino-acid sequence as plotmath
+#'
+#' @param sequence A parsed sequence from
+#'   `.parse_reducing_end_aa_sequence()`.
+#'
+#' @returns A length-one plotmath string with a bold site.
+#' @noRd
+.format_reducing_end_aa_sequence <- function(sequence) {
+  paste0(
+    .quote_plotmath_text(sequence$prefix),
+    "~bold(",
+    .quote_plotmath_text(sequence$site),
+    ")~",
+    .quote_plotmath_text(sequence$suffix)
+  )
+}
+
+#' Calculate the tagged-site position within an amino-acid sequence
+#'
+#' @param sequence A parsed sequence from
+#'   `.parse_reducing_end_aa_sequence()`.
+#' @param red_end_size Size of the amino-acid sequence text.
+#' @param font_family Font family used for the amino-acid sequence text.
+#'
+#' @returns A numeric justification between zero and one.
+#' @noRd
+.reducing_end_aa_sequence_hjust <- function(
+  sequence,
+  red_end_size = 6,
+  font_family = ""
+) {
+  metrics <- .reducing_end_aa_sequence_metrics(
+    sequence,
+    red_end_size,
+    font_family
+  )
+  metrics$hjust
+}
+
+#' Measure a tagged amino-acid sequence in plot coordinates
+#'
+#' @param sequence A parsed sequence from
+#'   `.parse_reducing_end_aa_sequence()`.
+#' @param red_end_size Size of the amino-acid sequence text.
+#' @param font_family Font family used for the amino-acid sequence text.
+#'
+#' @returns A list containing the full text `width` and `height`, the
+#'   `site_center` distance from the start of the text to the middle of the
+#'   tagged amino acid in plot coordinate units, and its numeric `hjust`.
+#' @noRd
+.reducing_end_aa_sequence_metrics <- function(
+  sequence,
+  red_end_size = 6,
+  font_family = ""
+) {
+  named_font_family <- nzchar(font_family) &&
+    !font_family %in% c("sans", "serif", "mono")
+  metric_font_family <- .reducing_end_metric_font_family(font_family)
+  original_device <- grDevices::dev.cur()
+  no_device_open <- original_device == 1L
+  measurement_file <- NULL
+  measurement_device <- NULL
+  opened_device <- FALSE
+  if (
+    named_font_family &&
+      requireNamespace("ragg", quietly = TRUE)
+  ) {
+    ragg::agg_capture()
+    measurement_device <- grDevices::dev.cur()
+    opened_device <- TRUE
+  } else if (named_font_family && capabilities("cairo")) {
+    measurement_file <- tempfile(fileext = ".pdf")
+    grDevices::cairo_pdf(measurement_file)
+    measurement_device <- grDevices::dev.cur()
+    opened_device <- TRUE
+  } else if (no_device_open) {
+    grDevices::pdf(NULL)
+    measurement_device <- grDevices::dev.cur()
+    opened_device <- TRUE
+  }
+  if (opened_device) {
+    on.exit(
+      {
+        devices <- grDevices::dev.list()
+        if (
+          !is.null(devices) &&
+            measurement_device %in% devices
+        ) {
+          grDevices::dev.off(which = measurement_device)
+        }
+        if (!is.null(measurement_file)) {
+          unlink(measurement_file)
+        }
+        devices <- grDevices::dev.list()
+        if (
+          original_device != 1L &&
+            !is.null(devices) &&
+            original_device %in% devices
+        ) {
+          grDevices::dev.set(which = original_device)
+        }
+      },
+      add = TRUE
+    )
+  }
+  measurement_size <- if (red_end_size == 0) 1 else red_end_size
+  labels <- c(
+    full = .format_reducing_end_aa_sequence(sequence),
+    through_site = paste0(
+      .quote_plotmath_text(sequence$prefix),
+      "~bold(",
+      .quote_plotmath_text(sequence$site),
+      ")"
+    ),
+    site = paste0(
+      "bold(",
+      .quote_plotmath_text(sequence$site),
+      ")"
+    )
+  )
+  grobs <- lapply(labels, function(label) {
+    grid::textGrob(
+      label = parse(text = label),
+      gp = grid::gpar(
+        fontsize = measurement_size * ggplot2::.pt,
+        fontfamily = metric_font_family
+      )
+    )
+  })
+  widths <- vapply(
+    grobs,
+    function(grob) {
+      grid::convertWidth(
+        grid::grobWidth(grob),
+        "mm",
+        valueOnly = TRUE
+      )
+    },
+    numeric(1)
+  )
+  height <- grid::convertHeight(
+    grid::grobHeight(grobs[["full"]]),
+    "mm",
+    valueOnly = TRUE
+  )
+  millimetres_per_coordinate <-
+    .cartoon_units_per_coordinate / 300 * 25.4
+  size_scale <- red_end_size / measurement_size
+  width <- widths[["full"]] / millimetres_per_coordinate
+  site_center <- (widths[["through_site"]] -
+    widths[["site"]] / 2) /
+    millimetres_per_coordinate
+
+  list(
+    width = width * size_scale,
+    height = height / millimetres_per_coordinate * size_scale,
+    site_center = site_center * size_scale,
+    hjust = site_center / width
+  )
+}
+
+#' Resolve a named font to the family selected by the graphics font matcher
+#'
+#' @param font_family Requested text font family.
+#'
+#' @returns The concrete matched family when `systemfonts` is available, or the
+#'   requested family otherwise.
+#' @noRd
+.reducing_end_metric_font_family <- function(font_family) {
+  if (
+    !nzchar(font_family) ||
+      font_family %in% c("sans", "serif", "mono") ||
+      !requireNamespace("systemfonts", quietly = TRUE) ||
+      !exists("match_fonts", asNamespace("systemfonts"), inherits = FALSE)
+  ) {
+    return(font_family)
+  }
+  matched <- systemfonts::match_fonts(font_family)
+  info <- systemfonts::font_info(
+    path = matched$path[[1]],
+    index = matched$index[[1]]
+  )
+  info$family[[1]]
+}
+
+#' Calculate amino-acid sequence text rotation
+#'
+#' @param orient Drawing orientation.
+#'
+#' @returns Zero for vertical glycans, 90 for leftward glycans, and -90 for
+#'   rightward glycans.
+#' @noRd
+.reducing_end_aa_sequence_angle <- function(orient) {
+  switch(
+    orient,
+    left = 90,
+    right = -90,
+    up = 0,
+    down = 0
+  )
 }
 
 #' Build reducing-end segment, label, wave, and bounds data
@@ -973,22 +1412,35 @@
 #'   supplies the reducing-end alpha/beta/unknown label.
 #' @param coor A numeric coordinate matrix with columns `x` and `y`, one row
 #'   per graph vertex.
-#' @param orient Drawing orientation, either `"H"` or `"V"`.
+#' @param orient Drawing orientation, one of `"left"`, `"right"`, `"up"`, or
+#'   `"down"`.
 #' @param red_end A string. `""` draws only the current reducing-end line,
-#'   `"~"` draws a wavy end, and any other string draws custom text.
+#'   `"~"` draws a wavy end, a string with one `<site>` tag draws an amino-acid
+#'   sequence, and any other string draws custom text. Ignored when
+#'   `red_end_length` is `0`.
+#' @param red_end_length Length of the reducing-end line in plot coordinate
+#'   units. At `0`, the line and all `red_end` decorations are omitted while
+#'   the core anomer annotation remains.
+#' @param red_end_size Size of custom reducing-end text.
+#' @param font_family Font family used for custom reducing-end text.
 #'
 #' @returns A list with data frames `annotation`, `segment`, `wave`, and
 #'   `bounds`. `annotation` contains text rows; `segment` contains one line
-#'   segment row; `wave` contains path coordinates for `"~"`; `bounds` contains
-#'   invisible points used to reserve space for custom text.
+#'   segment row when `red_end_length` is positive; `wave` contains path
+#'   coordinates for `"~"`; `bounds` contains invisible points used to reserve
+#'   space for custom text.
 #' @noRd
 .reducing_end_annotation_data <- function(
   structure,
   coor,
-  orient = c("H", "V"),
-  red_end = ""
+  orient = c("left", "right", "up", "down"),
+  red_end = "",
+  red_end_length = 0.6,
+  red_end_size = 6,
+  font_family = ""
 ) {
   orient <- rlang::arg_match(orient)
+  checkmate::assert_string(red_end, na.ok = FALSE)
   anomer <- igraph::graph_attr(structure, "anomer")
   if (.has_no_reducing_end_anomer(anomer)) {
     return(.empty_reducing_end_annotation_data())
@@ -996,23 +1448,42 @@
 
   label <- .reducing_end_anomer_label(anomer)
   root <- length(structure)
-  geometry <- .reducing_end_geometry(coor[root, ], orient)
+  geometry <- .reducing_end_geometry(
+    coor[root, ],
+    orient,
+    label = label,
+    line_length = red_end_length
+  )
+  anomer_annotation <- .reducing_end_anomer_row(
+    root,
+    label,
+    geometry$label_coor
+  )
+  if (red_end_length == 0) {
+    result <- .empty_reducing_end_annotation_data()
+    result$annotation <- anomer_annotation
+    return(result)
+  }
   red_end_annotation <- .reducing_end_text_data(
     red_end,
     geometry$line_end,
     geometry$line_vec,
     orient,
-    root
+    root,
+    red_end_size,
+    font_family
   )
   red_end_bounds <- .reducing_end_text_bounds(
     red_end,
     geometry$line_end,
     geometry$line_vec,
-    orient
+    orient,
+    red_end_size,
+    font_family
   )
   list(
     annotation = dplyr::bind_rows(
-      .reducing_end_anomer_row(root, label, geometry$label_coor),
+      anomer_annotation,
       red_end_annotation
     ),
     segment = .reducing_end_segment_data(
@@ -1054,7 +1525,9 @@
       y = numeric(0),
       hjust = numeric(0),
       vjust = numeric(0),
-      is_red_end_text = logical(0)
+      is_red_end_text = logical(0),
+      is_aa_sequence = logical(0),
+      angle = numeric(0)
     ),
     segment = data.frame(
       start_x = numeric(0),
@@ -1097,9 +1570,11 @@
 #'
 #' @param root_coor A numeric vector with `x` and `y` coordinates for the
 #'   reducing-end residue.
-#' @param orient Drawing orientation, either `"H"` or `"V"`.
+#' @param orient Drawing orientation, one of `"left"`, `"right"`, `"up"`, or
+#'   `"down"`.
+#' @param label The reducing-end anomer label.
 #' @param line_length Numeric length of the reducing-end line segment.
-#' @param label_offset Numeric extra distance between the line length and the
+#' @param label_distance Numeric distance from the reducing-end residue to the
 #'   anomer label anchor before rotation.
 #'
 #' @returns A list with named numeric vectors `root_coor`, `line_vec`,
@@ -1108,16 +1583,38 @@
 .reducing_end_geometry <- function(
   root_coor,
   orient,
+  label = "",
   line_length = 0.6,
-  label_offset = 0.1
+  label_distance = 0.7
 ) {
   root_coor <- c(
     x = as.numeric(root_coor[["x"]]),
     y = as.numeric(root_coor[["y"]])
   )
   line_vec <- .reducing_end_line_vector(orient, line_length)
-  label_vec <- .reducing_end_line_vector(orient, line_length + label_offset)
-  label_coor <- root_coor + .rotated_reducing_end_label_vector(label_vec)
+  label_vec <- .reducing_end_line_vector(orient, label_distance)
+  if (line_length == 0) {
+    label_position_offset <- matrix(0.6 * label_vec, ncol = 1)
+  } else {
+    label_position_offset <- matrix(
+      .rotated_reducing_end_label_vector(label_vec),
+      ncol = 1
+    )
+    label_position_offset <- .nudge_child_label_perpendicular(
+      label_offset = label_position_offset,
+      direction = matrix(label_vec, ncol = 1),
+      nudge = .beta_perpendicular_nudge_for_linkage(
+        label,
+        root_coor[["x"]],
+        root_coor[["x"]] + label_vec[["x"]]
+      )
+    )
+  }
+  label_coor <- root_coor +
+    c(
+      x = as.numeric(label_position_offset[1, 1]),
+      y = as.numeric(label_position_offset[2, 1])
+    )
 
   list(
     root_coor = root_coor,
@@ -1129,17 +1626,14 @@
 
 #' Build an orientation-specific reducing-end line vector
 #'
-#' @param orient Drawing orientation, either `"H"` or `"V"`.
+#' @param orient Drawing orientation, one of `"left"`, `"right"`, `"up"`, or
+#'   `"down"`.
 #' @param length Numeric vector length in plot coordinate units.
 #'
-#' @returns A named numeric vector `c(x, y)`. Horizontal orientation points
-#'   right; vertical orientation points downward.
+#' @returns A named numeric vector `c(x, y)` pointing away from the glycan.
 #' @noRd
 .reducing_end_line_vector <- function(orient, length) {
-  if (orient == "H") {
-    return(c(x = length, y = 0))
-  }
-  c(x = 0, y = -length)
+  .rotate_cartoon_vector(c(x = length, y = 0), orient)
 }
 
 #' Rotate the reducing-end anomer label away from the line
@@ -1182,7 +1676,9 @@
     y = as.numeric(label_coor[["y"]]),
     hjust = 0.5,
     vjust = 0.5,
-    is_red_end_text = FALSE
+    is_red_end_text = FALSE,
+    is_aa_sequence = FALSE,
+    angle = 0
   )
 }
 
@@ -1211,8 +1707,11 @@
 #'   endpoint.
 #' @param line_vec A named numeric vector `c(x, y)` for the reducing-end line
 #'   direction.
-#' @param orient Drawing orientation, either `"H"` or `"V"`.
+#' @param orient Drawing orientation, one of `"left"`, `"right"`, `"up"`, or
+#'   `"down"`.
 #' @param root Integer reducing-end vertex index.
+#' @param red_end_size Size of custom reducing-end text.
+#' @param font_family Font family used for custom reducing-end text.
 #'
 #' @returns A data frame with columns `vertice`, `annot`, `x`, `y`, `hjust`,
 #'   `vjust`, and `is_red_end_text`. Returns an empty data frame with those
@@ -1223,7 +1722,9 @@
   line_end,
   line_vec,
   orient,
-  root
+  root,
+  red_end_size = 6,
+  font_family = ""
 ) {
   if (red_end %in% c("", "~")) {
     return(data.frame(
@@ -1233,22 +1734,55 @@
       y = numeric(0),
       hjust = numeric(0),
       vjust = numeric(0),
-      is_red_end_text = logical(0)
+      is_red_end_text = logical(0),
+      is_aa_sequence = logical(0),
+      angle = numeric(0)
     ))
   }
+  sequence <- .parse_reducing_end_aa_sequence(red_end)
   line_unit <- line_vec / sqrt(sum(line_vec^2))
-  text_offset <- 0.02
+  text_offset <- if (is.null(sequence)) 0.02 else 0
   text_coor <- line_end + line_unit * text_offset
-  hjust <- if (orient == "H") 0 else 0.5
-  vjust <- if (orient == "H") 0.5 else 1
+  hjust <- if (line_unit[["x"]] > 0) {
+    0
+  } else if (line_unit[["x"]] < 0) {
+    1
+  } else {
+    0.5
+  }
+  vjust <- if (line_unit[["y"]] > 0) {
+    0
+  } else if (line_unit[["y"]] < 0) {
+    1
+  } else {
+    0.5
+  }
+  if (!is.null(sequence)) {
+    hjust <- .reducing_end_aa_sequence_hjust(
+      sequence,
+      red_end_size,
+      font_family
+    )
+    vjust <- if (.is_horizontal_glycan_orientation(orient)) 1 else vjust
+  }
   data.frame(
     vertice = as.character(root),
-    annot = .quote_plotmath_text(red_end),
+    annot = if (is.null(sequence)) {
+      .quote_plotmath_text(red_end)
+    } else {
+      .format_reducing_end_aa_sequence(sequence)
+    },
     x = as.numeric(text_coor["x"]),
     y = as.numeric(text_coor["y"]),
     hjust = hjust,
     vjust = vjust,
-    is_red_end_text = TRUE
+    is_red_end_text = TRUE,
+    is_aa_sequence = !is.null(sequence),
+    angle = if (is.null(sequence)) {
+      0
+    } else {
+      .reducing_end_aa_sequence_angle(orient)
+    }
   )
 }
 
@@ -1259,20 +1793,70 @@
 #'   endpoint.
 #' @param line_vec A named numeric vector `c(x, y)` for the reducing-end line
 #'   direction.
-#' @param orient Drawing orientation, either `"H"` or `"V"`.
+#' @param orient Drawing orientation, one of `"left"`, `"right"`, `"up"`, or
+#'   `"down"`.
+#' @param red_end_size Size of custom reducing-end text.
+#' @param font_family Font family used for custom reducing-end text.
 #'
-#' @returns A data frame with numeric columns `x` and `y`. Horizontal text
-#'   returns one bound point; vertical text returns two bound points; `""` and
-#'   `"~"` return zero rows.
+#' @returns A data frame with numeric columns `x` and `y`. Amino-acid sequences
+#'   return all four text-box corners, ordinary horizontal text returns one
+#'   bound point, ordinary vertical text returns two, and `""` and `"~"` return
+#'   zero rows.
 #' @noRd
-.reducing_end_text_bounds <- function(red_end, line_end, line_vec, orient) {
+.reducing_end_text_bounds <- function(
+  red_end,
+  line_end,
+  line_vec,
+  orient,
+  red_end_size = 6,
+  font_family = ""
+) {
   if (red_end %in% c("", "~")) {
     return(data.frame(x = numeric(0), y = numeric(0)))
   }
   line_unit <- line_vec / sqrt(sum(line_vec^2))
   text_offset <- 0.1
-  text_width <- max(nchar(red_end), 1) * 0.12
-  if (orient == "H") {
+  sequence <- .parse_reducing_end_aa_sequence(red_end)
+  size_scale <- red_end_size / 6
+  if (!is.null(sequence)) {
+    metrics <- .reducing_end_aa_sequence_metrics(
+      sequence,
+      red_end_size,
+      font_family
+    )
+    hjust <- metrics$hjust
+    vjust <- if (.is_horizontal_glycan_orientation(orient)) {
+      1
+    } else if (line_unit[["y"]] > 0) {
+      0
+    } else if (line_unit[["y"]] < 0) {
+      1
+    } else {
+      0.5
+    }
+    angle <- .reducing_end_aa_sequence_angle(orient) * pi / 180
+    text_unit <- c(x = cos(angle), y = sin(angle))
+    normal_unit <- c(x = -sin(angle), y = cos(angle))
+    text_coor <- line_end
+    along <- c(-hjust, 1 - hjust) * metrics$width
+    across <- c(-vjust, 1 - vjust) * metrics$height
+    corners <- expand.grid(along = along, across = across)
+    return(data.frame(
+      x = as.numeric(
+        text_coor[["x"]] +
+          text_unit[["x"]] * corners$along +
+          normal_unit[["x"]] * corners$across
+      ),
+      y = as.numeric(
+        text_coor[["y"]] +
+          text_unit[["y"]] * corners$along +
+          normal_unit[["y"]] * corners$across
+      )
+    ))
+  }
+  display_width <- nchar(red_end, type = "width")
+  text_width <- max(display_width, 1) * 0.12 * size_scale
+  if (.is_horizontal_glycan_orientation(orient)) {
     text_bound <- line_end + line_unit * (text_offset + text_width)
     return(data.frame(
       x = as.numeric(text_bound["x"]),
@@ -1280,10 +1864,12 @@
     ))
   }
   text_coor <- line_end + line_unit * 0.02
-  text_height <- 0.36
+  text_height <- 0.36 * size_scale
   data.frame(
     x = as.numeric(text_coor["x"] + c(-1, 1) * text_width / 2),
-    y = as.numeric(text_coor["y"] + c(0, -text_height))
+    y = as.numeric(
+      text_coor["y"] + line_unit[["y"]] * c(0, text_height)
+    )
   )
 }
 

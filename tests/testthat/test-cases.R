@@ -2,6 +2,18 @@ skip_on_ci()
 skip_on_cran()
 skip_if_not_installed("vdiffr")
 
+test_that("Draw sketch-style glycan cartoon", {
+  skip_if_not_installed("ggsketch", minimum_version = "2.0.0")
+  vdiffr::expect_doppelganger(
+    "sketch-style glycan cartoon",
+    draw_cartoon_sketch(
+      "Fuc(a1-2)Gal(b1-3)GlcNAc(b1-3)GalNAc(a1-",
+      show_linkage = TRUE,
+      seed = 1
+    )
+  )
+})
+
 test_that("Draw G97345NY", {
   glycan <- "Neu5Ac(a2-3)Gal(b1-3)[Neu5Ac(a2-3)Gal(b1-4)[Fuc(a1-3)]GlcNAc(b1-6)]GalNAc(a1-"
   vdiffr::expect_doppelganger("G97345NY", draw_cartoon(glycan))
@@ -66,11 +78,11 @@ test_that("Draw Fuc triangle orientation controls", {
 
   vdiffr::expect_doppelganger(
     "flexible Fuc triangle orientation",
-    draw_cartoon(glycan, fuc_orient = "flex")
+    draw_cartoon(glycan, style = style_glydraw(fuc_orient = "flex"))
   )
   vdiffr::expect_doppelganger(
     "upward Fuc triangle orientation",
-    draw_cartoon(glycan, fuc_orient = "up")
+    draw_cartoon(glycan, style = style_glydraw(fuc_orient = "up"))
   )
 })
 
@@ -78,7 +90,11 @@ test_that("Draw vertical flexible Fuc triangles", {
   glycan <- "Fuc(a1-3)[Fuc(a1-6)]GlcNAc(b1-4)GlcNAc(b1-"
   vdiffr::expect_doppelganger(
     "vertical flexible Fuc triangles",
-    draw_cartoon(glycan, orient = "V", fuc_orient = "flex")
+    draw_cartoon(
+      glycan,
+      orient = "up",
+      style = style_glydraw(fuc_orient = "flex")
+    )
   )
 })
 
@@ -86,7 +102,11 @@ test_that("Draw vertical reducing-end Fuc triangle", {
   glycan <- "GlcNAc(b1-3)Fuc(a1-"
   vdiffr::expect_doppelganger(
     "vertical reducing-end Fuc triangle",
-    draw_cartoon(glycan, orient = "V", fuc_orient = "flex")
+    draw_cartoon(
+      glycan,
+      orient = "up",
+      style = style_glydraw(fuc_orient = "flex")
+    )
   )
 })
 
@@ -139,7 +159,7 @@ test_that("Draw custom node size", {
   glycan <- "Gal(b1-3)GalNAc(a1-"
   vdiffr::expect_doppelganger(
     "custom node size",
-    draw_cartoon(glycan, node_size = 1.2)
+    draw_cartoon(glycan, style = style_glydraw(node_size = 1.2))
   )
 })
 
@@ -147,22 +167,33 @@ test_that("Draw oversized node size with linkage hidden", {
   glycan <- "Gal(b1-3)GalNAc(a1-"
 
   expect_warning(
-    plot <- draw_cartoon(glycan, node_size = 1.25, red_end = "Ser/Thr"),
+    plot <- draw_cartoon(
+      glycan,
+      style = style_glydraw(node_size = 1.5, red_end = "Ser/Thr")
+    ),
     "Linkage annotations are hidden"
   )
   vdiffr::expect_doppelganger("oversized node size hides linkage", plot)
 })
 
-test_that("Draw orientation-specific HexNAc linkage labels", {
+test_that("Draw directional HexNAc linkage labels", {
   glycan <- "GalNAc(b1-3)[GalNAc(b1-6)]GalNAc(a1-"
 
   vdiffr::expect_doppelganger(
     "horizontal HexNAc linkage labels",
-    draw_cartoon(glycan, orient = "H")
+    draw_cartoon(glycan, orient = "left")
+  )
+  vdiffr::expect_doppelganger(
+    "rightward HexNAc linkage labels",
+    draw_cartoon(glycan, orient = "right")
   )
   vdiffr::expect_doppelganger(
     "vertical HexNAc linkage labels",
-    draw_cartoon(glycan, orient = "V")
+    draw_cartoon(glycan, orient = "up")
+  )
+  vdiffr::expect_doppelganger(
+    "downward HexNAc linkage labels",
+    draw_cartoon(glycan, orient = "down")
   )
 })
 
@@ -171,20 +202,43 @@ test_that("Draw reducing-end annotations", {
 
   vdiffr::expect_doppelganger(
     "custom reducing-end text",
-    draw_cartoon(glycan, red_end = "Ser/Thr")
+    draw_cartoon(glycan, style = style_glydraw(red_end = "Ser/Thr"))
   )
   vdiffr::expect_doppelganger(
     "custom reducing-end text without linkage",
-    draw_cartoon(glycan, show_linkage = FALSE, red_end = "Ser/Thr")
+    draw_cartoon(
+      glycan,
+      show_linkage = FALSE,
+      style = style_glydraw(red_end = "Ser/Thr")
+    )
   )
   vdiffr::expect_doppelganger(
     "vertical custom reducing-end text",
-    draw_cartoon(glycan, orient = "V", red_end = "Ser/Thr")
+    draw_cartoon(
+      glycan,
+      orient = "up",
+      style = style_glydraw(red_end = "Ser/Thr")
+    )
   )
   vdiffr::expect_doppelganger(
     "wavy reducing end",
-    draw_cartoon(glycan, red_end = "~")
+    draw_cartoon(glycan, style = style_glydraw(red_end = "~"))
   )
+})
+
+test_that("Draw amino-acid reducing ends in every orientation", {
+  glycan <- paste0(
+    "Man(a1-3)[Man(a1-6)]Man(b1-4)",
+    "GlcNAc(b1-4)GlcNAc(b1-"
+  )
+  red_end <- "ABC<site>D</site>EFGHIJK"
+
+  purrr::walk(c("left", "right", "up", "down"), function(orient) {
+    vdiffr::expect_doppelganger(
+      paste("amino-acid reducing end", orient),
+      draw_cartoon(glycan, orient = orient, red_end = red_end)
+    )
+  })
 })
 
 test_that("Draw linkage-hidden branch", {
@@ -206,11 +260,11 @@ test_that("Draw substituent annotations", {
   )
   vdiffr::expect_doppelganger(
     "horizontal substituent annotation",
-    draw_cartoon(oriented, orient = "H")
+    draw_cartoon(oriented, orient = "left")
   )
   vdiffr::expect_doppelganger(
     "vertical substituent annotation",
-    draw_cartoon(oriented, orient = "V")
+    draw_cartoon(oriented, orient = "up")
   )
   vdiffr::expect_doppelganger(
     "unknown substituent linkage annotation",
@@ -236,7 +290,10 @@ test_that("Draw representative Fuc-like residues", {
   )
   vdiffr::expect_doppelganger(
     "upward Fuc-like triangle orientation FucNAc",
-    draw_cartoon("FucNAc(a1-3)[FucNAc(a1-6)]GlcNAc(b1-", fuc_orient = "up")
+    draw_cartoon(
+      "FucNAc(a1-3)[FucNAc(a1-6)]GlcNAc(b1-",
+      style = style_glydraw(fuc_orient = "up")
+    )
   )
 })
 
@@ -255,7 +312,11 @@ test_that("Exported cartoons preserve Fuc orientation", {
   fs::dir_create(temp_dir)
 
   suppressMessages(
-    result <- export_cartoons(glycan, temp_dir, fuc_orient = "up")
+    result <- export_cartoons(
+      glycan,
+      temp_dir,
+      style = style_glydraw(fuc_orient = "up")
+    )
   )
 
   vdiffr::expect_doppelganger(
@@ -271,7 +332,11 @@ test_that("Exported cartoons preserve custom node size", {
   fs::dir_create(temp_dir)
 
   suppressMessages(
-    result <- export_cartoons(glycan, temp_dir, node_size = 1.2)
+    result <- export_cartoons(
+      glycan,
+      temp_dir,
+      style = style_glydraw(node_size = 1.2)
+    )
   )
 
   vdiffr::expect_doppelganger("exported custom node size", result[[1]])
@@ -353,7 +418,7 @@ test_that("Justify vertical ggplot2 glycan annotations", {
   ) +
     ggplot2::geom_hline(yintercept = 1, colour = "grey80") +
     ggplot2::geom_point() +
-    geom_glycan(orient = "V", vjust = 0, hjust = 0.5) +
+    geom_glycan(orient = "up", vjust = 0, hjust = 0.5) +
     ggplot2::coord_cartesian(
       xlim = c(0, 6),
       ylim = c(0, 5),

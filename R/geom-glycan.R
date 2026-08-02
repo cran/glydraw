@@ -8,12 +8,13 @@
 #' These helpers align the reducing end of every glycan cartoon with its anchor
 #' in [geom_glycan()], [scale_x_glycan()], [scale_y_glycan()], or
 #' [guide_glycan()]. Use `hjust_red_end()` for horizontal alignment when
-#' `orient = "V"`, and use `vjust_red_end()` for vertical alignment when
-#' `orient = "H"`. Because the required justification is calculated separately
-#' from each cartoon's rendered bounds, the helpers also work for collections
-#' of glycans with different asymmetric branches. Glycan scales and guides use
-#' reducing-end justification by default along the axis perpendicular to the
-#' drawing orientation; [geom_glycan()] remains centered by default.
+#' `orient` is `"up"` or `"down"`, and use `vjust_red_end()` for vertical
+#' alignment when `orient` is `"left"` or `"right"`. Because the required
+#' justification is calculated separately from each cartoon's rendered bounds,
+#' the helpers also work for collections of glycans with different asymmetric
+#' branches. Glycan scales and guides use reducing-end justification by default
+#' along the axis perpendicular to the drawing orientation; [geom_glycan()]
+#' remains centered by default.
 #'
 #' @returns A reducing-end justification marker accepted by the glycan layer,
 #'   scales, and guide.
@@ -29,13 +30,13 @@
 #'   glycan,
 #'   ggplot2::aes(x = .data$x, y = .data$y, structure = .data$structure)
 #' ) +
-#'   geom_glycan(orient = "V", hjust = hjust_red_end())
+#'   geom_glycan(orient = "up", hjust = hjust_red_end())
 #'
 #' ggplot2::ggplot(
 #'   glycan,
 #'   ggplot2::aes(x = .data$x, y = .data$y, structure = .data$structure)
 #' ) +
-#'   geom_glycan(orient = "H", vjust = vjust_red_end())
+#'   geom_glycan(orient = "left", vjust = vjust_red_end())
 #' @export
 hjust_red_end <- function() {
   .hjust_red_end
@@ -103,6 +104,12 @@ vjust_red_end <- function() {
 #'   Use [vjust_red_end()] to anchor a horizontal cartoon at its reducing end.
 #' - `angle`, an optional rotation in degrees that defaults to `0`. Rotation is
 #'   applied after the cartoon is drawn, independently of `orient`.
+#' - `alpha`, an optional whole-cartoon transparency. The default, `NA`, is
+#'   opaque. Each cartoon is composited before alpha is applied so nodes
+#'   continue to occlude the linkage edges beneath them. Non-opaque values
+#'   require a graphics device that supports alpha masks and transformations;
+#'   unsupported devices throw an error rather than render an inaccurate
+#'   cartoon.
 #'
 #' @returns A ggplot2 layer that can be added to a [ggplot2::ggplot()] object.
 #'
@@ -139,7 +146,7 @@ vjust_red_end <- function() {
 #'   glycans,
 #'   ggplot2::aes(x = .data$x, y = 1, structure = .data$structure)
 #' ) +
-#'   geom_glycan(orient = "V", vjust = 0)
+#'   geom_glycan(orient = "up", vjust = 0)
 #' @export
 geom_glycan <- function(
   mapping = NULL,
@@ -149,53 +156,32 @@ geom_glycan <- function(
   ...,
   angle = 0,
   show_linkage = TRUE,
-  orient = c("H", "V"),
-  fuc_orient = c("flex", "up"),
-  red_end = "",
-  edge_linewidth = 0.8,
-  node_linewidth = 0.8,
-  node_size = 1,
-  colors = NULL,
+  orient = c("left", "right", "up", "down"),
   highlight = NULL,
-  style = NULL,
+  style = style_glydraw(),
   na.rm = FALSE,
   show.legend = NA,
-  inherit.aes = TRUE
+  inherit.aes = TRUE,
+  red_end = NULL
 ) {
-  style <- .resolve_glydraw_style(
-    style = style,
-    show_linkage = show_linkage,
-    orient = orient,
-    fuc_orient = fuc_orient,
-    red_end = red_end,
-    edge_linewidth = edge_linewidth,
-    node_linewidth = node_linewidth,
-    node_size = node_size,
-    colors = colors,
-    .supplied = c(
-      show_linkage = !missing(show_linkage),
-      orient = !missing(orient),
-      fuc_orient = !missing(fuc_orient),
-      red_end = !missing(red_end),
-      edge_linewidth = !missing(edge_linewidth),
-      node_linewidth = !missing(node_linewidth),
-      node_size = !missing(node_size),
-      colors = !missing(colors)
-    )
-  )
+  orient <- rlang::arg_match(orient)
+  red_end <- .resolve_red_end(red_end, style)
   show_linkage <- .resolve_linkage_visibility(
-    style$show_linkage,
+    show_linkage,
     style$node_size
   )
 
   params <- rlang::list2(
     show_linkage = show_linkage,
-    orient = style$orient,
+    orient = orient,
     fuc_orient = style$fuc_orient,
-    red_end = style$red_end,
+    red_end = red_end,
+    red_end_length = style$red_end_length,
+    red_end_size = style$red_end_size,
     edge_linewidth = style$edge_linewidth,
     node_linewidth = style$node_linewidth,
     node_size = style$node_size,
+    font_family = style$font_family,
     colours = style$colors,
     highlight = highlight,
     na.rm = na.rm,
@@ -207,7 +193,7 @@ geom_glycan <- function(
   .validate_red_end_justification_orientation(
     params$hjust,
     params$vjust,
-    style$orient
+    orient
   )
 
   ggplot2::layer(
@@ -225,16 +211,19 @@ geom_glycan <- function(
 #' Draw a panel of positioned glycan grobs
 #'
 #' @param data Data frame prepared by ggplot2 with `x`, `y`, `structure`,
-#'   `size`, `hjust`, `vjust`, and `angle` columns.
+#'   `size`, `hjust`, `vjust`, `angle`, and `alpha` columns.
 #' @param panel_params Panel scale parameters supplied by ggplot2.
 #' @param coord Coordinate system supplied by ggplot2.
 #' @param show_linkage Logical scalar passed to [glycanGrob()].
 #' @param orient Drawing orientation passed to [glycanGrob()].
 #' @param fuc_orient Fuc-like triangle orientation passed to [glycanGrob()].
 #' @param red_end Reducing-end annotation passed to [glycanGrob()].
+#' @param red_end_length Reducing-end line length passed to [glycanGrob()].
+#' @param red_end_size Custom reducing-end text size passed to [glycanGrob()].
 #' @param edge_linewidth Linkage linewidth passed to [glycanGrob()].
 #' @param node_linewidth Node-border linewidth passed to [glycanGrob()].
 #' @param node_size Node-size multiplier passed to [glycanGrob()].
+#' @param font_family Font family passed to [glycanGrob()].
 #' @param colours Custom monosaccharide colors passed to [glycanGrob()].
 #' @param highlight Highlight indices passed to [glycanGrob()].
 #' @param na.rm Logical scalar handled by ggplot2 before panel drawing.
@@ -246,12 +235,15 @@ geom_glycan <- function(
   panel_params,
   coord,
   show_linkage = TRUE,
-  orient = "H",
+  orient = "left",
   fuc_orient = "flex",
   red_end = "",
+  red_end_length = 0.6,
+  red_end_size = 6,
   edge_linewidth = 0.8,
   node_linewidth = 0.8,
   node_size = 1,
+  font_family = "",
   colours = NULL,
   highlight = NULL,
   na.rm = FALSE
@@ -270,31 +262,63 @@ geom_glycan <- function(
   .validate_glycan_justification(coordinates$hjust, "hjust")
   .validate_glycan_justification(coordinates$vjust, "vjust")
   .validate_glycan_angles(coordinates$angle)
+  .validate_glycan_alphas(coordinates$alpha)
+  structure_input <- coordinates$structure
+  if (
+    !is.null(highlight) &&
+      !glyrepr::is_glycan_structure(structure_input)
+  ) {
+    cli::cli_warn(
+      "{.arg highlight} can only be set when {.arg structure} is a {.fn glyrepr::glycan_structure}."
+    )
+    highlight <- NULL
+  }
+  structures <- .as_glycan_structure_input(structure_input)
+  unique_structures <- unique(structures)
+  structure_index <- match(structures, unique_structures)
+  grob_cache <- lapply(seq_along(unique_structures), function(index) {
+    glycanGrob(
+      unique_structures[[index]],
+      show_linkage = show_linkage,
+      orient = orient,
+      highlight = highlight,
+      style = style_glydraw(
+        fuc_orient = fuc_orient,
+        red_end = red_end,
+        edge_linewidth = edge_linewidth,
+        node_linewidth = node_linewidth,
+        node_size = node_size,
+        font_family = font_family,
+        colors = colours,
+        red_end_length = red_end_length,
+        red_end_size = red_end_size
+      )
+    )
+  })
   grobs <- purrr::pmap(
     list(
-      structure = coordinates$structure,
+      grob = grob_cache[structure_index],
       x = coordinates$x,
       y = coordinates$y,
       size = coordinates$size,
       hjust = coordinates$hjust,
       vjust = coordinates$vjust,
       angle = coordinates$angle,
+      alpha = coordinates$alpha,
       index = seq_len(nrow(coordinates))
     ),
-    function(structure, x, y, size, hjust, vjust, angle, index) {
-      glycanGrob(
-        structure,
-        show_linkage = show_linkage,
-        orient = orient,
-        fuc_orient = fuc_orient,
-        red_end = red_end,
-        edge_linewidth = edge_linewidth,
-        node_linewidth = node_linewidth,
-        node_size = node_size,
-        colors = colours,
-        highlight = highlight
-      ) |>
-        .position_glycan_grob(x, y, size, hjust, vjust, angle, index)
+    function(grob, x, y, size, hjust, vjust, angle, alpha, index) {
+      .position_glycan_grob(
+        grob,
+        x,
+        y,
+        size,
+        hjust,
+        vjust,
+        angle,
+        alpha,
+        index
+      )
     }
   )
 
@@ -313,6 +337,7 @@ geom_glycan <- function(
 #' @param hjust Numeric horizontal justification.
 #' @param vjust Numeric vertical justification.
 #' @param angle Numeric rotation in degrees.
+#' @param alpha Numeric whole-cartoon transparency.
 #' @param index Integer row index used to create a unique grob name.
 #'
 #' @returns The input grob with a panel-positioning viewport and unique name.
@@ -325,6 +350,7 @@ geom_glycan <- function(
   hjust,
   vjust,
   angle,
+  alpha,
   index
 ) {
   grob$name <- paste0("geom_glycan.", index)
@@ -332,6 +358,7 @@ geom_glycan <- function(
   grob$glydraw_hjust <- hjust
   grob$glydraw_vjust <- vjust
   grob$glydraw_angle <- angle
+  grob$glydraw_alpha <- alpha
   grob$glydraw_border_px <- 0
   grob$glydraw_background <- FALSE
   grob$vp <- grid::viewport(
@@ -444,18 +471,24 @@ geom_glycan <- function(
 ) {
   if (
     any(.is_red_end_justification(hjust, "hjust")) &&
-      !identical(orient, "V")
+      !.is_vertical_glycan_orientation(orient)
   ) {
     cli::cli_abort(
-      "{.fn hjust_red_end} can only be used when {.code orient = \"V\"}."
+      paste0(
+        "{.fn hjust_red_end} can only be used when {.arg orient} is ",
+        "{.code \"up\"} or {.code \"down\"}."
+      )
     )
   }
   if (
     any(.is_red_end_justification(vjust, "vjust")) &&
-      !identical(orient, "H")
+      !.is_horizontal_glycan_orientation(orient)
   ) {
     cli::cli_abort(
-      "{.fn vjust_red_end} can only be used when {.code orient = \"H\"}."
+      paste0(
+        "{.fn vjust_red_end} can only be used when {.arg orient} is ",
+        "{.code \"left\"} or {.code \"right\"}."
+      )
     )
   }
   invisible(NULL)
@@ -473,6 +506,24 @@ geom_glycan <- function(
   invisible(angle)
 }
 
+#' Validate mapped glycan transparency
+#'
+#' @param alpha Numeric vector of alpha aesthetic values.
+#'
+#' @returns `alpha`, invisibly. Throws an error when non-missing values are not
+#'   finite numbers between zero and one.
+#' @noRd
+.validate_glycan_alphas <- function(alpha) {
+  checkmate::assert_numeric(
+    alpha,
+    lower = 0,
+    upper = 1,
+    any.missing = TRUE,
+    finite = TRUE
+  )
+  invisible(alpha)
+}
+
 #' ggplot2 geom for glycan grobs
 #'
 #' @noRd
@@ -481,7 +532,13 @@ GeomGlycan <- ggplot2::ggproto(
   ggplot2::Geom,
   required_aes = c("x", "y", "structure"),
   non_missing_aes = c("size", "hjust", "vjust", "angle"),
-  default_aes = ggplot2::aes(size = 1, hjust = 0.5, vjust = 0.5, angle = 0),
+  default_aes = ggplot2::aes(
+    size = 1,
+    hjust = 0.5,
+    vjust = 0.5,
+    angle = 0,
+    alpha = NA
+  ),
   extra_params = "na.rm",
   draw_key = ggplot2::draw_key_blank,
   draw_panel = .draw_glycan_panel

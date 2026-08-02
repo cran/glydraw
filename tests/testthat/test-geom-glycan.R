@@ -23,7 +23,30 @@ test_that("geom_glycan maps structures to x and y positions", {
   expect_equal(built$data[[1]]$size, rep(1, nrow(data)))
   expect_equal(built$data[[1]]$hjust, rep(0.5, nrow(data)))
   expect_equal(built$data[[1]]$vjust, rep(0.5, nrow(data)))
+  expect_identical(built$data[[1]]$alpha, rep(NA, nrow(data)))
   expect_setequal(GeomGlycan$required_aes, c("x", "y", "structure"))
+})
+
+test_that("geom_glycan red_end overrides its style", {
+  style <- style_glydraw(red_end = "~")
+
+  expect_identical(geom_glycan(style = style)$geom_params$red_end, "~")
+  expect_identical(
+    geom_glycan(style = style, red_end = "Reducing end")$geom_params$red_end,
+    "Reducing end"
+  )
+  expect_equal(
+    geom_glycan(
+      style = style_glydraw(red_end_length = 1.25)
+    )$geom_params$red_end_length,
+    1.25
+  )
+  expect_equal(
+    geom_glycan(
+      style = style_glydraw(red_end_size = 9)
+    )$geom_params$red_end_size,
+    9
+  )
 })
 
 test_that("geom_glycan preserves mapped glycan structure vectors", {
@@ -67,6 +90,8 @@ test_that("geom_glycan draws one configured glycan grob per row", {
       "Gal(b1-4)GlcNAc(b1-"
     )
   )
+  colors <- glydraw_colors()
+  colors["glyYellow"] <- "#123456"
   plot <- ggplot2::ggplot(
     data,
     ggplot2::aes(
@@ -76,11 +101,11 @@ test_that("geom_glycan draws one configured glycan grob per row", {
     )
   ) +
     geom_glycan(
-      style = glydraw_style(
-        show_linkage = FALSE,
+      show_linkage = FALSE,
+      style = style_glydraw(
         edge_linewidth = 1.1,
         node_linewidth = 0.3,
-        colors = c(Gal = "#123456")
+        colors = colors
       )
     )
 
@@ -98,6 +123,42 @@ test_that("geom_glycan draws one configured glycan grob per row", {
     expect_s3_class(grob$vp, "viewport")
   })
   expect_no_error(ggplot2::ggplotGrob(plot))
+})
+
+test_that("geom_glycan prepares repeated structures once per panel", {
+  structures <- c(
+    "Gal(b1-3)GalNAc(a1-",
+    "Gal(b1-3)GalNAc(a1-",
+    "Gal(b1-4)GlcNAc(b1-",
+    "Gal(b1-3)GalNAc(a1-"
+  )
+  data <- data.frame(
+    x = seq_along(structures),
+    y = 1,
+    structure = structures
+  )
+  call_count <- 0L
+  original_glycan_grob <- glycanGrob
+  testthat::local_mocked_bindings(
+    glycanGrob = function(...) {
+      call_count <<- call_count + 1L
+      original_glycan_grob(...)
+    }
+  )
+
+  plot <- ggplot2::ggplot(
+    data,
+    ggplot2::aes(
+      x = .data$x,
+      y = .data$y,
+      structure = .data$structure
+    )
+  ) +
+    geom_glycan()
+  layer <- ggplot2::layer_grob(plot)
+
+  expect_equal(call_count, 2L)
+  expect_length(layer[[1]]$children, length(structures))
 })
 
 test_that("geom_glycan requires structure, x, and y aesthetics", {
@@ -136,13 +197,119 @@ test_that("geom_glycan uses size as a whole-cartoon scale multiplier", {
   layer <- ggplot2::layer_grob(plot)[[1]]
   scales <- purrr::map_dbl(layer$children, "glydraw_scale")
   content <- purrr::map(layer$children, grid::makeContent)
-  rasters <- purrr::map(content, ~ .x$children[[1]])
-  widths <- purrr::map_dbl(rasters, ~ as.numeric(.x$width))
-  heights <- purrr::map_dbl(rasters, ~ as.numeric(.x$height))
+  cartoons <- purrr::map(content, ~ .x$children[[1]])
+  widths <- purrr::map_dbl(cartoons, ~ as.numeric(.x$width))
+  heights <- purrr::map_dbl(cartoons, ~ as.numeric(.x$height))
   expect_equal(unname(scales), data$size)
-  purrr::walk(rasters, expect_s3_class, "rastergrob")
+  purrr::walk(cartoons, expect_s3_class, "glycan_grid_grob")
   expect_equal(widths[[2]] / widths[[1]], 3)
   expect_equal(heights[[2]] / heights[[1]], 3)
+})
+
+test_that("geom_glycan applies alpha without exposing edges through nodes", {
+  data <- data.frame(
+    x = c(1, 2),
+    y = 1,
+    alpha = c(0.25, 0.75),
+    structure = rep("Gal(b1-3)GalNAc(a1-", 2)
+  )
+  plot <- ggplot2::ggplot(
+    data,
+    ggplot2::aes(
+      x = .data$x,
+      y = .data$y,
+      structure = .data$structure,
+      alpha = .data$alpha
+    )
+  ) +
+    geom_glycan() +
+    ggplot2::scale_alpha_identity()
+
+  layer <- ggplot2::layer_grob(plot)[[1]]
+
+  expect_equal(
+    unname(purrr::map_dbl(layer$children, "glydraw_alpha")),
+    data$alpha
+  )
+
+  rendered <- grid::makeContent(layer$children[[1]])
+  cartoon <- rendered$children[[1]]
+  panel_index <- match("panel", cartoon$layout$name)
+  primitives <- cartoon$grobs[[panel_index]]$children
+  alpha_grob <- primitives[["glycan.alpha"]]
+  alpha_group <- alpha_grob$children[["glycan.alpha.group"]]
+
+  expect_s3_class(alpha_grob, "gTree")
+  expect_s3_class(alpha_group, "GridGroup")
+  expect_s3_class(alpha_grob$vp$mask, "GridMask")
+  expect_contains(
+    names(alpha_group$src$children),
+    c("glycan.edges", "glycan.node.mask", "glycan.node")
+  )
+})
+
+test_that("geom_glycan rejects alpha on incapable graphics devices", {
+  capabilities <- list(masks = NA, transformations = FALSE)
+
+  expect_no_error(.validate_cartoon_alpha_device(1, capabilities))
+  expect_snapshot(
+    error = TRUE,
+    .validate_cartoon_alpha_device(0.5, capabilities)
+  )
+})
+
+test_that("geom_glycan exports scaled cartoons as vector graphics", {
+  data <- data.frame(
+    x = 1,
+    y = 1,
+    structure = "Gal(b1-3)GalNAc(a1-"
+  )
+  plot <- ggplot2::ggplot(
+    data,
+    ggplot2::aes(
+      x = .data$x,
+      y = .data$y,
+      structure = .data$structure
+    )
+  ) +
+    geom_glycan(size = 0.6, alpha = 0.5)
+
+  pdf_file <- tempfile(fileext = ".pdf")
+  grDevices::pdf(pdf_file, compress = FALSE)
+  print(plot)
+  grDevices::dev.off()
+  pdf_raw <- readBin(
+    pdf_file,
+    "raw",
+    n = file.info(pdf_file)$size
+  )
+
+  expect_length(
+    grepRaw("/Subtype /Image", pdf_raw, fixed = TRUE, all = TRUE),
+    0
+  )
+
+  svg_file <- tempfile(fileext = ".svg")
+  current_device <- grDevices::dev.cur()
+  svg_available <- suppressWarnings(tryCatch(
+    {
+      grDevices::svg(svg_file)
+      grDevices::dev.cur() != current_device
+    },
+    error = \(...) FALSE
+  ))
+  skip_if_not(svg_available, "The SVG graphics device is unavailable.")
+  on.exit(
+    if (grDevices::dev.cur() != current_device) {
+      grDevices::dev.off()
+    },
+    add = TRUE
+  )
+  print(plot)
+  grDevices::dev.off()
+  svg <- readLines(svg_file, warn = FALSE)
+
+  expect_equal(any(grepl("<image", svg, fixed = TRUE)), FALSE)
 })
 
 test_that("geom_glycan rejects non-positive size multipliers", {
@@ -201,7 +368,7 @@ test_that("geom_glycan maps hjust and vjust to whole-cartoon alignment", {
   purrr::walk(child_viewports, expect_s3_class, "viewport")
 })
 
-test_that("geom_glycan centers both orientations by default", {
+test_that("geom_glycan centers all orientations by default", {
   data <- data.frame(
     x = 1,
     y = 1,
@@ -211,12 +378,23 @@ test_that("geom_glycan centers both orientations by default", {
     data,
     ggplot2::aes(x = .data$x, y = .data$y, structure = .data$structure)
   )
-  horizontal <- ggplot2::layer_grob(plot + geom_glycan(orient = "H"))[[1]]
-  vertical <- ggplot2::layer_grob(plot + geom_glycan(orient = "V"))[[1]]
-  grobs <- c(horizontal$children, vertical$children)
+  grobs <- purrr::map(
+    c("left", "right", "up", "down"),
+    function(orient) {
+      ggplot2::layer_grob(
+        plot + geom_glycan(orient = orient)
+      )[[1]]$children[[1]]
+    }
+  )
 
-  expect_equal(unname(purrr::map_dbl(grobs, "glydraw_hjust")), c(0.5, 0.5))
-  expect_equal(unname(purrr::map_dbl(grobs, "glydraw_vjust")), c(0.5, 0.5))
+  expect_equal(
+    unname(purrr::map_dbl(grobs, "glydraw_hjust")),
+    rep(0.5, 4)
+  )
+  expect_equal(
+    unname(purrr::map_dbl(grobs, "glydraw_vjust")),
+    rep(0.5, 4)
+  )
 })
 
 test_that("geom_glycan anchors vertical glycans at their reducing ends", {
@@ -236,7 +414,7 @@ test_that("geom_glycan anchors vertical glycans at their reducing ends", {
     data,
     ggplot2::aes(x = .data$x, y = .data$y, structure = .data$structure)
   ) +
-    geom_glycan(orient = "V", hjust = hjust_red_end())
+    geom_glycan(orient = "up", hjust = hjust_red_end())
 
   grobs <- ggplot2::layer_grob(plot)[[1]]$children
   displacement <- purrr::map_dbl(grobs, .reducing_end_displacement, "x")
@@ -258,7 +436,7 @@ test_that("geom_glycan anchors horizontal glycans at their reducing ends", {
     data,
     ggplot2::aes(x = .data$x, y = .data$y, structure = .data$structure)
   ) +
-    geom_glycan(orient = "H", vjust = vjust_red_end())
+    geom_glycan(orient = "left", vjust = vjust_red_end())
 
   grobs <- ggplot2::layer_grob(plot)[[1]]$children
   displacement <- purrr::map_dbl(grobs, .reducing_end_displacement, "y")
@@ -269,11 +447,11 @@ test_that("geom_glycan anchors horizontal glycans at their reducing ends", {
 test_that("reducing-end justification helpers require matching orientations", {
   expect_snapshot(
     error = TRUE,
-    geom_glycan(orient = "H", hjust = hjust_red_end())
+    geom_glycan(orient = "left", hjust = hjust_red_end())
   )
   expect_snapshot(
     error = TRUE,
-    geom_glycan(orient = "V", vjust = vjust_red_end())
+    geom_glycan(orient = "up", vjust = vjust_red_end())
   )
 })
 
@@ -293,12 +471,12 @@ test_that("geom_glycan rotates cartoons independently of their orientation", {
       angle = .data$angle
     )
   ) +
-    geom_glycan(orient = "V")
+    geom_glycan(orient = "up")
   static_plot <- ggplot2::ggplot(
     data[1, c("x", "y", "structure")],
     ggplot2::aes(x = .data$x, y = .data$y, structure = .data$structure)
   ) +
-    geom_glycan(orient = "V", angle = 90)
+    geom_glycan(orient = "up", angle = 90)
 
   layer <- ggplot2::layer_grob(plot)[[1]]
   static_grob <- ggplot2::layer_grob(static_plot)[[1]]$children[[1]]
@@ -315,7 +493,7 @@ test_that("geom_glycan rotates cartoons independently of their orientation", {
     layer$children,
     ~ identical(
       .x$polygon_coor$shape,
-      glycanGrob(data$structure[[1]], orient = "V")$polygon_coor$shape
+      glycanGrob(data$structure[[1]], orient = "up")$polygon_coor$shape
     )
   )))
   expect_equal(static_grob$glydraw_angle, 90)
@@ -336,7 +514,7 @@ test_that("geom_glycan justifies content while preserving drawing allowance", {
       structure = .data$structure
     )
   ) +
-    geom_glycan(orient = "V", vjust = 0)
+    geom_glycan(orient = "up", vjust = 0)
 
   grob <- ggplot2::layer_grob(plot)[[1]]$children[[1]]
   geom_cartoon <- .glycan_grob_to_plot(grob)
@@ -347,7 +525,7 @@ test_that("geom_glycan justifies content while preserving drawing allowance", {
   geom_y_panel_range <- geom_built$layout$panel_params[[1]]$y.range
   geom_size <- attr(geom_cartoon, "glydraw_size_px")
   geom_panel_size <- attr(geom_cartoon, "glydraw_panel_size_px")
-  standalone_cartoon <- draw_cartoon(data$structure, orient = "V")
+  standalone_cartoon <- draw_cartoon(data$structure, orient = "up")
   standalone_data_range <- ggplot2::get_panel_scales(
     standalone_cartoon
   )$y$range$range

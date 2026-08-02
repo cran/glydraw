@@ -5,30 +5,14 @@
 #' @param ... Ignored.
 #' @param show_linkage Show glycosidic linkage annotations or not. Default is
 #'   TRUE. Substituent annotations are always shown.
-#' @param orient The orientation of glycan structure. "H" for horizontal, "V" for vertical.
-#'   Default is "H"
-#' @param fuc_orient Fuc-like triangle orientation. `"flex"` points
-#'   non-reducing Fuc-like residues toward their rendered linkage direction,
-#'   while `"up"` draws all Fuc-like triangles pointing upward. Reducing-end
-#'   Fuc-like residues always point upward. Defaults to `"flex"`.
-#' @param red_end Reducing-end annotation. The default `""` keeps the current
-#'   reducing-end line. Use `"~"` to add a wavy reducing end, or any other
-#'   string to draw that string at the reducing end.
-#' @param edge_linewidth Numeric scalar controlling the linewidth of linkage
-#'   lines. Defaults to the current value, `0.8`.
-#' @param node_linewidth Numeric scalar controlling the linewidth of node
-#'   borders. Defaults to the current value, `0.8`.
-#' @param node_size Numeric scalar used as a multiplier for the default node
-#'   size. Defaults to `1`, which keeps the current size. Linkage annotations
-#'   are moved farther from larger nodes, and are hidden with a warning when
-#'   `node_size` is too large to leave enough annotation space. Values larger
-#'   than `2` are rejected because residues overlap.
-#' @param colors Optional named character vector of custom monosaccharide fill
-#'   colors. Names must be supported monosaccharide names, such as `"Gal"` or
-#'   `"GlcNAc"`. User-provided colors overwrite the default SNFG colors, while
-#'   unprovided monosaccharides keep their default colors. Defaults to `NULL`.
-#' @param style A `glydraw_style` object that supplies rendering options.
-#'   Explicitly supplied rendering arguments override it.
+#' @param orient Direction in which the glycan extends from its reducing end:
+#'   one of `"left"`, `"right"`, `"up"`, or `"down"`. Defaults to `"left"`.
+#' @param style A [style_glydraw()] object that controls the cartoon's visual
+#'   appearance.
+#' @param red_end Reducing-end annotation. `NULL`, the default, uses `red_end`
+#'   from `style`. A non-`NULL` value overrides `style$red_end`. Ignored when
+#'   `style$red_end_length` is `0`. To annotate an amino-acid sequence, tag its
+#'   single glycosite as, for example, `"ABC<site>D</site>EFG"`.
 #' @param highlight An integer vector specifying the node indices to highlight.
 #'   This argument is applicable only when `structure` is a [glyrepr::glycan_structure()].
 #'   Note that for a [glyrepr::glycan_structure()], the node indices correspond exactly
@@ -39,54 +23,28 @@
 #' @returns a ggplot2 object
 #' @examples
 #' draw_cartoon("Gal(b1-3)GalNAc(a1-")
+#' draw_cartoon(
+#'   "Gal(b1-3)GalNAc(a1-",
+#'   style = style_glydraw(font_family = "serif")
+#' )
 #' @export
 draw_cartoon <- function(
   structure,
   ...,
   show_linkage = TRUE,
-  orient = c("H", "V"),
-  fuc_orient = c("flex", "up"),
-  red_end = "",
-  edge_linewidth = 0.8,
-  node_linewidth = 0.8,
-  node_size = 1,
-  colors = NULL,
+  orient = c("left", "right", "up", "down"),
   highlight = NULL,
-  style = NULL
+  style = style_glydraw(),
+  red_end = NULL
 ) {
-  style <- .resolve_glydraw_style(
-    style = style,
-    show_linkage = show_linkage,
-    orient = orient,
-    fuc_orient = fuc_orient,
-    red_end = red_end,
-    edge_linewidth = edge_linewidth,
-    node_linewidth = node_linewidth,
-    node_size = node_size,
-    colors = colors,
-    .supplied = c(
-      show_linkage = !missing(show_linkage),
-      orient = !missing(orient),
-      fuc_orient = !missing(fuc_orient),
-      red_end = !missing(red_end),
-      edge_linewidth = !missing(edge_linewidth),
-      node_linewidth = !missing(node_linewidth),
-      node_size = !missing(node_size),
-      colors = !missing(colors)
-    )
-  )
   glycanGrob(
     structure,
     ...,
-    show_linkage = style$show_linkage,
-    orient = style$orient,
-    fuc_orient = style$fuc_orient,
-    red_end = style$red_end,
-    edge_linewidth = style$edge_linewidth,
-    node_linewidth = style$node_linewidth,
-    node_size = style$node_size,
-    colors = style$colors,
-    highlight = highlight
+    show_linkage = show_linkage,
+    orient = orient,
+    highlight = highlight,
+    style = style,
+    red_end = red_end
   ) |>
     .glycan_grob_to_plot()
 }

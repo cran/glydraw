@@ -18,41 +18,29 @@ glycanGrob <- function(
   structure,
   ...,
   show_linkage = TRUE,
-  orient = c("H", "V"),
-  fuc_orient = c("flex", "up"),
-  red_end = "",
-  edge_linewidth = 0.8,
-  node_linewidth = 0.8,
-  node_size = 1,
-  colors = NULL,
+  orient = c("left", "right", "up", "down"),
   highlight = NULL,
-  style = NULL
+  style = style_glydraw(),
+  red_end = NULL
 ) {
-  style <- .resolve_glydraw_style(
-    style = style,
-    show_linkage = show_linkage,
-    orient = orient,
-    fuc_orient = fuc_orient,
+  orient <- rlang::arg_match(orient, error_call = NULL)
+  checkmate::assert_class(style, "glydraw_style")
+  red_end <- .resolve_red_end(red_end, style)
+  style <- .make_glydraw_style(
+    fuc_orient = style$fuc_orient,
     red_end = red_end,
-    edge_linewidth = edge_linewidth,
-    node_linewidth = node_linewidth,
-    node_size = node_size,
-    colors = colors,
-    .supplied = c(
-      show_linkage = !missing(show_linkage),
-      orient = !missing(orient),
-      fuc_orient = !missing(fuc_orient),
-      red_end = !missing(red_end),
-      edge_linewidth = !missing(edge_linewidth),
-      node_linewidth = !missing(node_linewidth),
-      node_size = !missing(node_size),
-      colors = !missing(colors)
-    )
+    edge_linewidth = style$edge_linewidth,
+    node_linewidth = style$node_linewidth,
+    node_size = style$node_size,
+    font_family = style$font_family,
+    colors = style$colors,
+    red_end_length = style$red_end_length,
+    red_end_size = style$red_end_size
   )
   inputs <- .prepare_cartoon_inputs(
     structure,
     highlight,
-    style$orient,
+    orient,
     style$red_end
   )
   structure <- inputs$structure
@@ -60,7 +48,7 @@ glycanGrob <- function(
   highlight <- inputs$highlight
   orient <- inputs$orient
   show_linkage <- .resolve_linkage_visibility(
-    style$show_linkage,
+    show_linkage,
     style$node_size
   )
 
@@ -81,7 +69,11 @@ glycanGrob <- function(
     orient,
     style$red_end,
     highlight,
-    node_size = style$node_size
+    node_size = style$node_size,
+    show_linkage = show_linkage,
+    red_end_length = style$red_end_length,
+    red_end_size = style$red_end_size,
+    font_family = style$font_family
   )
   connect_df <- .cartoon_segment_data(
     structure,
@@ -102,6 +94,7 @@ glycanGrob <- function(
     show_linkage = show_linkage,
     edge_linewidth = style$edge_linewidth,
     node_linewidth = style$node_linewidth,
+    font_family = style$font_family,
     cl = "glycanGrob"
   )
 }
@@ -130,6 +123,7 @@ glycanGrob <- function(
     grob$show_linkage,
     grob$edge_linewidth,
     grob$node_linewidth,
+    grob$font_family,
     border_px = border_px,
     background = background
   )
@@ -139,7 +133,7 @@ glycanGrob <- function(
 #'
 #' @param x A `glycanGrob` object.
 #'
-#' @returns `x` with its ggplot-backed grid drawing added as a child grob.
+#' @returns `x` with its native grid drawing added as a child grob.
 #' @noRd
 #' @importFrom grid makeContent
 #' @export
@@ -161,19 +155,19 @@ makeContent.glycanGrob <- function(x) {
     reducing_end_coor <- c(x = 0, y = 0)
   }
 
-  plot <- .glycan_grob_to_plot(x)
-  size_px <- attr(plot, "glydraw_size_px")
-  if (!isTRUE(all.equal(scale, 1))) {
-    child <- .scaled_glycan_raster_grob(plot, scale, x$name)
+  layout <- .cartoon_grid_layout(x)
+  if (
+    isTRUE(all.equal(scale, 1)) &&
+      !layout$background &&
+      layout$border_px == 0
+  ) {
+    child <- .cartoon_grid_gtable(x, layout, x$name)
   } else {
-    child <- plot |>
-      .strip_cartoon_class() |>
-      ggplot2::ggplotGrob()
+    child <- .cartoon_grid_grob(x, layout, scale, x$name)
   }
   child <- .justify_glycan_child(
     child,
-    plot,
-    size_px,
+    layout,
     scale,
     hjust,
     vjust,
@@ -183,40 +177,10 @@ makeContent.glycanGrob <- function(x) {
   grid::setChildren(x, grid::gList(child))
 }
 
-#' Render a uniformly scaled glycan raster grob
-#'
-#' @param plot A `glydraw_cartoon` ggplot object.
-#' @param scale Positive numeric whole-cartoon scale multiplier.
-#' @param name String used to name the raster grob.
-#'
-#' @returns A raster grob whose physical width and height are the cartoon's
-#'   natural dimensions multiplied by `scale`.
-#' @noRd
-.scaled_glycan_raster_grob <- function(plot, scale, name) {
-  size_px <- attr(plot, "glydraw_size_px")
-  raster <- .render_cartoon_raster(plot, scale = scale)
-
-  grid::rasterGrob(
-    raster,
-    width = grid::unit(
-      size_px[["width"]] / .default_cartoon_dpi * scale,
-      "in"
-    ),
-    height = grid::unit(
-      size_px[["height"]] / .default_cartoon_dpi * scale,
-      "in"
-    ),
-    interpolate = TRUE,
-    name = paste0(name, ".scaled")
-  )
-}
-
 #' Justify a rendered glycan child around its panel anchor
 #'
 #' @param child Rendered grid grob containing one glycan cartoon.
-#' @param plot A `glydraw_cartoon` ggplot object.
-#' @param size_px Named numeric vector with the cartoon's natural `width` and
-#'   `height` in pixels.
+#' @param layout Grid layout metadata from `.cartoon_grid_layout()`.
 #' @param scale Positive numeric whole-cartoon scale multiplier.
 #' @param hjust Numeric horizontal justification.
 #' @param vjust Numeric vertical justification.
@@ -228,8 +192,7 @@ makeContent.glycanGrob <- function(x) {
 #' @noRd
 .justify_glycan_child <- function(
   child,
-  plot,
-  size_px,
+  layout,
   scale,
   hjust,
   vjust,
@@ -242,9 +205,8 @@ makeContent.glycanGrob <- function(x) {
     return(child)
   }
 
-  offset <- .glycan_justification_offset(
-    plot,
-    size_px,
+  offset <- .cartoon_grid_justification_offset(
+    layout,
     scale,
     hjust,
     vjust,
@@ -258,6 +220,53 @@ makeContent.glycanGrob <- function(x) {
   )
   child$glydraw_justification_offset <- offset
   child
+}
+
+#' Calculate a glycan justification offset from its unexpanded coordinates
+#'
+#' @param layout Grid layout metadata from `.cartoon_grid_layout()`.
+#' @param scale Positive numeric whole-cartoon scale multiplier.
+#' @param hjust Numeric horizontal justification.
+#' @param vjust Numeric vertical justification.
+#' @param reducing_end_coor Named numeric vector containing the reducing-end
+#'   residue's `x` and `y` coordinates.
+#'
+#' @returns A named numeric vector `c(x, y)` containing offsets in inches.
+#' @noRd
+.cartoon_grid_justification_offset <- function(
+  layout,
+  scale,
+  hjust,
+  vjust,
+  reducing_end_coor = c(x = 0, y = 0)
+) {
+  x_anchor <- .normalized_cartoon_anchor(
+    layout$data_ranges$x,
+    layout$panel_ranges$x,
+    hjust,
+    red_end_coordinate = if (.is_red_end_justification(hjust, "hjust")) {
+      reducing_end_coor[["x"]]
+    }
+  )
+  y_anchor <- .normalized_cartoon_anchor(
+    layout$data_ranges$y,
+    layout$panel_ranges$y,
+    vjust,
+    red_end_coordinate = if (.is_red_end_justification(vjust, "vjust")) {
+      reducing_end_coor[["y"]]
+    }
+  )
+
+  c(
+    x = (0.5 - x_anchor) *
+      layout$size_px[["width"]] /
+      .default_cartoon_dpi *
+      scale,
+    y = (0.5 - y_anchor) *
+      layout$size_px[["height"]] /
+      .default_cartoon_dpi *
+      scale
+  )
 }
 
 #' Calculate a glycan justification offset from its unexpanded coordinates
