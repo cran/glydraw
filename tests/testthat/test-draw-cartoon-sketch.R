@@ -21,6 +21,19 @@ test_that("draw_cartoon_sketch shows linkage annotations by default", {
   expect_length(hidden_text, 0)
 })
 
+test_that("draw_cartoon_sketch draws the alditol core marker", {
+  glycan <- "Man(a1-3)[Man(a1-6)]Man(b1-4)GlcNAc-ol(?1-"
+  plot <- draw_cartoon_sketch(glycan, seed = 1)
+  marker_layers <- Filter(
+    \(layer) inherits(layer$geom, "GeomGlydrawResidue"),
+    plot$layers
+  )
+
+  expect_length(marker_layers, 1)
+  expect_equal(marker_layers[[1]]$aes_params$fill, NA)
+  expect_equal(marker_layers[[1]]$aes_params$colour, "black")
+})
+
 test_that("draw_cartoon_sketch uses one handwriting font for text labels", {
   plot <- draw_cartoon_sketch(
     "Gal(b1-3)GalNAc(a1-",
@@ -47,6 +60,34 @@ test_that("draw_cartoon_sketch uses one handwriting font for text labels", {
       TRUE
     )
   }
+})
+
+test_that("draw_cartoon_sketch italicizes furanose center markers", {
+  plot <- draw_cartoon_sketch(
+    "D-Fuc(a1-2)Fucf(a1-3)D-Fucf(a1-",
+    show_linkage = FALSE,
+    seed = 1
+  )
+  text_layers <- Filter(
+    \(layer) inherits(layer$geom, "GeomText"),
+    plot$layers
+  )
+  parsed <- Filter(
+    \(layer) isTRUE(layer$geom_params$parse),
+    text_layers
+  )
+  text <- ggplot2::ggplot_build(plot)$data
+  center_text <- Filter(
+    \(layer) "size" %in% names(layer) && all(layer$size == 4.5),
+    text
+  )
+
+  expect_length(text_layers, 2)
+  expect_length(parsed, 1)
+  expect_setequal(
+    unlist(lapply(center_text, \(layer) layer$label), use.names = FALSE),
+    c("D", 'italic("f")', '"D"*italic("f")')
+  )
 })
 
 test_that("draw_cartoon_sketch ignores font_family in every style preset", {

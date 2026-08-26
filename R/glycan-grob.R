@@ -45,6 +45,7 @@ glycanGrob <- function(
   )
   structure <- inputs$structure
   coor <- inputs$coor
+  floating <- inputs$floating
   highlight <- inputs$highlight
   orient <- inputs$orient
   show_linkage <- .resolve_linkage_visibility(
@@ -56,11 +57,22 @@ glycanGrob <- function(
     structure,
     coor,
     highlight,
-    style$fuc_orient
+    style$fuc_orient,
+    visible_vertices = if (is.null(floating)) {
+      seq_len(length(structure))
+    } else {
+      floating$visible_vertices
+    }
   )
   polygon_coor <- .residue_polygon_data(
     gly_list,
     .default_node_point_size * style$node_size
+  )
+  alditol_marker <- .alditol_marker_data(
+    structure,
+    coor,
+    gly_list,
+    style$node_size
   )
   filled_color <- .resolve_residue_fill_colors(polygon_coor, style$colors)
   annotation_data <- .cartoon_text_annotation_data(
@@ -73,24 +85,29 @@ glycanGrob <- function(
     show_linkage = show_linkage,
     red_end_length = style$red_end_length,
     red_end_size = style$red_end_size,
-    font_family = style$font_family
+    font_family = style$font_family,
+    floating = floating,
+    fuc_orient = style$fuc_orient
   )
   connect_df <- .cartoon_segment_data(
     structure,
     coor,
     annotation_data$reducing_info$segment,
-    gly_list
+    gly_list,
+    floating
   )
 
   grid::gTree(
     connect_df = connect_df,
     polygon_coor = polygon_coor,
+    alditol_marker = alditol_marker,
     reducing_end_coor = c(
       x = unname(coor[nrow(coor), "x"]),
       y = unname(coor[nrow(coor), "y"])
     ),
     filled_color = filled_color,
     annotation_data = annotation_data,
+    floating = floating,
     show_linkage = show_linkage,
     edge_linewidth = style$edge_linewidth,
     node_linewidth = style$node_linewidth,
@@ -118,6 +135,7 @@ glycanGrob <- function(
   .assemble_cartoon_plot(
     grob$connect_df,
     grob$polygon_coor,
+    grob$alditol_marker,
     grob$filled_color,
     grob$annotation_data,
     grob$show_linkage,

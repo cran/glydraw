@@ -44,7 +44,7 @@
 .sketch_cartoon_base_layers <- function(grob, sketch) {
   node_layers <- .sketch_cartoon_node_layers(grob, sketch)
 
-  ggplot2::ggplot() +
+  plot <- ggplot2::ggplot() +
     ggsketch::geom_sketch_segment(
       data = grob$connect_df,
       ggplot2::aes(
@@ -76,6 +76,17 @@
     ggplot2::coord_fixed(ratio = 1, clip = "off") +
     ggplot2::theme_void() +
     ggplot2::theme(legend.position = "none")
+  if (nrow(grob$alditol_marker) > 0) {
+    plot <- plot +
+      .geom_glydraw_residue(
+        data = grob$alditol_marker,
+        alpha = grob$alditol_marker$alpha,
+        fill = NA,
+        colour = "black",
+        linewidth = grob$node_linewidth
+      )
+  }
+  plot
 }
 
 #' Build one independently seeded sketch layer per residue
@@ -183,9 +194,10 @@
   }
   family <- .resolve_sketch_text_family()
   annotation$annot_label <- .sketch_annotation_labels(annotation)
-  aa_sequence <- annotation$is_aa_sequence
+  parse_annotation <- annotation$is_aa_sequence |
+    .sketch_center_uses_plotmath(annotation)
   for (parse in c(FALSE, TRUE)) {
-    rows <- aa_sequence == parse
+    rows <- parse_annotation == parse
     if (!any(rows)) {
       next
     }
@@ -215,7 +227,8 @@
 #' @param annotation An annotation data frame with character column `annot`.
 #'
 #' @returns A character vector containing Unicode Greek letters, normalized
-#'   unknown linkages, and otherwise unchanged annotation text.
+#'   unknown linkages, plotmath furanose labels, and otherwise unchanged
+#'   annotation text.
 #' @noRd
 .sketch_annotation_labels <- function(annotation) {
   labels <- annotation$annot
@@ -229,11 +242,28 @@
       annotation$is_aa_sequence
     ]
   }
+  center_plotmath <- .sketch_center_uses_plotmath(annotation)
+  labels[center_plotmath] <- annotation$annot_label[center_plotmath]
   labels[labels == "alpha"] <- "\u03b1"
   labels[labels == "beta"] <- "\u03b2"
   unknown <- labels %in% c("?", "??", '~"?"') | grepl("^\\?\\d+", labels)
   labels[unknown] <- "?"
   labels
+}
+
+#' Identify sketch center labels that require plotmath
+#'
+#' @param annotation A text-annotation data frame.
+#'
+#' @returns A logical vector marking furanose center labels.
+#' @noRd
+.sketch_center_uses_plotmath <- function(annotation) {
+  if (!"annotation_type" %in% names(annotation)) {
+    return(rep(FALSE, nrow(annotation)))
+  }
+  !is.na(annotation$annotation_type) &
+    annotation$annotation_type == "residue_center" &
+    endsWith(annotation$annot, "f")
 }
 
 #' Resolve a handwriting font that covers all sketch annotation glyphs

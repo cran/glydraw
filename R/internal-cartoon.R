@@ -8,6 +8,7 @@
 .cartoon_panel_expansion <- 0.05
 .node_size_linkage_threshold <- 1.4
 .node_size_upper_boundary <- 2
+.alditol_marker_radius_multiplier <- 0.18
 
 #' Validate node-size input
 #'
@@ -304,13 +305,18 @@ GeomGlydrawResidue <- ggplot2::ggproto(
   }
 
   structure <- .as_single_glycan_structure(structure)
+  floating_parts <- glyrepr::structure_floating_parts(structure)
   structure <- glyrepr::get_structure_graphs(structure, return_list = FALSE)
   highlight <- .validate_highlight_indices(highlight, length(structure))
   orient <- rlang::arg_match(orient)
+  layout <- .layout_cartoon_coordinates(structure, floating_parts)
+  layout <- .orient_cartoon_layout(layout, orient)
+  highlight <- .merge_floating_highlights(highlight, layout$floating)
 
   list(
     structure = structure,
-    coor = .oriented_cartoon_coordinates(structure, orient),
+    coor = layout$coor,
+    floating = layout$floating,
     highlight = highlight,
     orient = orient
   )
@@ -437,7 +443,8 @@ GeomGlydrawResidue <- ggplot2::ggproto(
   structure,
   coor,
   highlight = NULL,
-  fuc_orient = c("flex", "up")
+  fuc_orient = c("flex", "up"),
+  visible_vertices = seq_len(length(structure))
 ) {
   fuc_orient <- rlang::arg_match(fuc_orient)
   gly_list <- data.frame(
@@ -461,7 +468,70 @@ GeomGlydrawResidue <- ggplot2::ggproto(
     "glycoform",
     "transparency"
   )
-  gly_list
+  gly_list[visible_vertices, , drop = FALSE]
+}
+
+#' Check whether a glycan graph represents an alditol
+#'
+#' @param structure An igraph glycan graph.
+#'
+#' @returns A logical scalar.
+#' @noRd
+.is_alditol_structure <- function(structure) {
+  isTRUE(igraph::graph_attr(structure, "alditol"))
+}
+
+#' Build the hollow black core marker used for alditols
+#'
+#' @param structure An igraph glycan graph.
+#' @param coor A numeric coordinate matrix with columns `x` and `y`.
+#' @param gly_list A data frame returned by `.cartoon_residue_data()`.
+#' @param node_size Numeric node-size multiplier.
+#'
+#' @returns A zero- or one-row data frame compatible with the residue-circle
+#'   drawing layer.
+#' @noRd
+.alditol_marker_data <- function(structure, coor, gly_list, node_size = 1) {
+  marker <- data.frame(
+    point_x = numeric(),
+    point_y = numeric(),
+    center_x = numeric(),
+    center_y = numeric(),
+    radius = numeric(),
+    primitive = character(),
+    group = character(),
+    alpha = numeric(),
+    stringsAsFactors = FALSE
+  )
+  if (!.is_alditol_structure(structure)) {
+    return(marker)
+  }
+
+  root <- length(structure)
+  core_row <- match(root, as.integer(rownames(gly_list)))
+  if (is.na(core_row)) {
+    return(marker)
+  }
+  offset <- .residue_center_glyph_offset(
+    gly_list$glycoform[[core_row]],
+    node_size
+  )
+  center_x <- coor[root, "x"] + offset[1, "x"]
+  center_y <- coor[root, "y"] + offset[1, "y"]
+
+  data.frame(
+    point_x = center_x,
+    point_y = center_y,
+    center_x = center_x,
+    center_y = center_y,
+    radius = .default_node_point_size *
+      node_size *
+      .alditol_marker_radius_multiplier,
+    primitive = "circle",
+    group = "glycan.alditol",
+    alpha = gly_list$transparency[[core_row]],
+    stringsAsFactors = FALSE
+  )
 }
 
 #' Build all text annotation data for a cartoon
@@ -482,6 +552,8 @@ GeomGlydrawResidue <- ggplot2::ggproto(
 #'   size.
 #' @param show_linkage Logical scalar indicating whether linkage annotations
 #'   will be drawn.
+#' @param fuc_orient Orientation strategy for Fuc-like triangles, either
+#'   `"flex"` or `"up"`.
 #'
 #' @returns A list with `annotation`, the complete text annotation data frame;
 #'   `show_without_linkage`, substituent and custom reducing-end text rows that
@@ -499,21 +571,50 @@ GeomGlydrawResidue <- ggplot2::ggproto(
   show_linkage = TRUE,
   red_end_length = 0.6,
   red_end_size = 6,
-  font_family = ""
+  font_family = "",
+  floating = NULL,
+  fuc_orient = c("flex", "up")
 ) {
   orient <- rlang::arg_match(orient)
+  fuc_orient <- rlang::arg_match(fuc_orient)
+  visible_vertices <- if (is.null(floating)) {
+    seq_len(length(structure))
+  } else {
+    floating$visible_vertices
+  }
+  residue_center_annotation <- .residue_center_annotation_data(
+    structure,
+    coor,
+    node_size = node_size,
+    fuc_orient = fuc_orient
+  ) |>
+    dplyr::filter(.data$vertice %in% as.character(visible_vertices)) |>
+    dplyr::mutate(
+      annotation_type = "residue_center",
+      show_without_linkage = TRUE
+    )
   substituent_annotation <- .substituent_annotation_data(
     structure,
     coor,
     orient,
     node_size = node_size
-  )
+  ) |>
+    dplyr::filter(.data$vertice %in% as.character(visible_vertices)) |>
+    dplyr::mutate(
+      annotation_type = "substituent",
+      show_without_linkage = TRUE
+    )
+  floating_count_annotation <- .floating_count_annotation_data(
+    floating
+  ) |>
+    dplyr::mutate(
+      annotation_type = "floating_count",
+      show_without_linkage = TRUE
+    )
   substituent_bounds <- .substituent_annotation_bounds(
     substituent_annotation,
     orient
   )
-  substituent_annotation <- substituent_annotation |>
-    dplyr::mutate(show_without_linkage = TRUE)
   reducing_info <- .reducing_end_annotation_data(
     structure,
     coor,
@@ -524,27 +625,51 @@ GeomGlydrawResidue <- ggplot2::ggproto(
     font_family
   )
   reducing_annotation <- reducing_info$annotation |>
-    dplyr::mutate(show_without_linkage = .data$is_red_end_text)
-  visible_without_linkage <- nrow(substituent_annotation) > 0 ||
+    dplyr::mutate(
+      annotation_type = "reducing_end",
+      show_without_linkage = .data$is_red_end_text
+    )
+  visible_without_linkage <- nrow(residue_center_annotation) > 0 ||
+    nrow(substituent_annotation) > 0 ||
+    nrow(floating_count_annotation) > 0 ||
     any(reducing_annotation$show_without_linkage)
   if (show_linkage || visible_without_linkage) {
     linkage_annotation <- .linkage_annotation_data(
       structure,
       coor,
       node_size = node_size,
-      orient = orient
+      orient = orient,
+      visible_vertices = visible_vertices
     ) |>
-      dplyr::mutate(show_without_linkage = FALSE)
+      dplyr::mutate(
+        annotation_type = "linkage",
+        show_without_linkage = FALSE
+      )
+    floating_linkage_annotation <- .floating_linkage_annotation_data(
+      structure,
+      coor,
+      orient,
+      floating,
+      node_size
+    ) |>
+      dplyr::mutate(
+        annotation_type = "floating_linkage",
+        show_without_linkage = FALSE
+      )
   } else {
     linkage_annotation <- .empty_linkage_annotation_data() |>
-      dplyr::mutate(show_without_linkage = logical())
+      dplyr::mutate(
+        annotation_type = character(),
+        show_without_linkage = logical()
+      )
+    floating_linkage_annotation <- linkage_annotation
   }
   struc_annotation <- dplyr::bind_rows(
     linkage_annotation,
-    substituent_annotation
-  )
-  struc_annotation <- dplyr::bind_rows(
-    struc_annotation,
+    floating_linkage_annotation,
+    residue_center_annotation,
+    substituent_annotation,
+    floating_count_annotation,
     reducing_annotation
   )
   struc_annotation <- .separate_overlapping_annotations(struc_annotation)
@@ -604,6 +729,12 @@ GeomGlydrawResidue <- ggplot2::ggproto(
   if (!"angle" %in% names(annotation)) {
     annotation$angle <- 0
   }
+  if (!"annotation_type" %in% names(annotation)) {
+    annotation$annotation_type <- NA_character_
+  }
+  if (!"text_size" %in% names(annotation)) {
+    annotation$text_size <- NA_real_
+  }
   annotation |>
     dplyr::mutate(
       is_red_end_text = dplyr::if_else(
@@ -619,13 +750,15 @@ GeomGlydrawResidue <- ggplot2::ggproto(
       hjust = dplyr::if_else(is.na(.data$hjust), 0.5, .data$hjust),
       vjust = dplyr::if_else(is.na(.data$vjust), 0.5, .data$vjust),
       angle = dplyr::if_else(is.na(.data$angle), 0, .data$angle),
-      text_size = dplyr::if_else(
-        .data$is_red_end_text,
-        red_end_size,
-        6
+      text_size = dplyr::case_when(
+        !is.na(.data$text_size) ~ .data$text_size,
+        .data$is_red_end_text ~ red_end_size,
+        TRUE ~ 6
       ),
       annot_label = dplyr::case_when(
         .data$is_aa_sequence ~ .data$annot,
+        .data$annotation_type == "residue_center" ~
+          .residue_center_plotmath_label(.data$annot),
         .data$annot == "?" ~ '~"?"',
         .data$annot == "??" ~ '~"?"',
         grepl("^\\?\\d+", .data$annot) ~ '~"?"',
@@ -673,17 +806,71 @@ GeomGlydrawResidue <- ggplot2::ggproto(
   structure,
   coor,
   reducing_segment,
-  gly_list
+  gly_list,
+  floating = NULL
 ) {
+  visible_vertices <- if (is.null(floating)) {
+    seq_len(length(structure))
+  } else {
+    floating$visible_vertices
+  }
+  edges <- igraph::as_edgelist(structure, names = FALSE)
+  visible_edges <- if (nrow(edges) == 0) {
+    logical()
+  } else {
+    edges[, 1] %in% visible_vertices & edges[, 2] %in% visible_vertices
+  }
+  edges <- edges[visible_edges, , drop = FALSE]
   gly_connect <- .connection_segment_data(structure, coor)
+  gly_connect <- purrr::map(gly_connect, \(.coordinate) {
+    .coordinate[visible_edges]
+  })
   connect_df <- data.frame(
     start_x = gly_connect$start_x,
     start_y = gly_connect$start_y,
     end_x = gly_connect$end_x,
-    end_y = gly_connect$end_y
+    end_y = gly_connect$end_y,
+    transparency = if (nrow(edges) == 0) {
+      numeric()
+    } else {
+      gly_list$transparency[
+        match(edges[, 2], as.integer(rownames(gly_list)))
+      ]
+    },
+    segment_type = rep("glycosidic", length(gly_connect$start_x))
   )
-  connect_df <- dplyr::bind_rows(connect_df, reducing_segment)
-  connect_df$transparency <- gly_list$transparency[seq_len(nrow(connect_df))]
+  reducing_transparency <- gly_list$transparency[
+    match(length(structure), as.integer(rownames(gly_list)))
+  ]
+  reducing_segment$transparency <- rep(
+    reducing_transparency,
+    nrow(reducing_segment)
+  )
+  reducing_segment$segment_type <- rep(
+    "reducing_end",
+    nrow(reducing_segment)
+  )
+  connect_df <- dplyr::bind_rows(
+    connect_df,
+    reducing_segment
+  )
+  if (!is.null(floating)) {
+    virtual_segments <- floating$virtual_segments
+    virtual_segments$transparency <- gly_list$transparency[
+      match(
+        virtual_segments$root,
+        as.integer(rownames(gly_list))
+      )
+    ]
+    virtual_segments$root <- NULL
+    bracket_segments <- floating$bracket_segments
+    bracket_segments$transparency <- 1
+    connect_df <- dplyr::bind_rows(
+      connect_df,
+      virtual_segments,
+      bracket_segments
+    )
+  }
   connect_df
 }
 
@@ -709,6 +896,7 @@ GeomGlydrawResidue <- ggplot2::ggproto(
 .assemble_cartoon_plot <- function(
   connect_df,
   polygon_coor,
+  alditol_marker,
   filled_color,
   annotation_data,
   show_linkage,
@@ -721,6 +909,7 @@ GeomGlydrawResidue <- ggplot2::ggproto(
   gly_graph <- .cartoon_base_layers(
     connect_df,
     polygon_coor,
+    alditol_marker,
     filled_color,
     edge_linewidth,
     node_linewidth
@@ -760,11 +949,12 @@ GeomGlydrawResidue <- ggplot2::ggproto(
 .cartoon_base_layers <- function(
   connect_df,
   polygon_coor,
+  alditol_marker,
   filled_color,
   edge_linewidth,
   node_linewidth
 ) {
-  ggplot2::ggplot() +
+  plot <- ggplot2::ggplot() +
     ggplot2::geom_segment(
       data = connect_df,
       ggplot2::aes(
@@ -792,6 +982,17 @@ GeomGlydrawResidue <- ggplot2::ggproto(
     ggplot2::coord_fixed(ratio = 1, clip = "off") +
     ggplot2::theme_void() +
     ggplot2::theme(legend.position = "none")
+  if (nrow(alditol_marker) > 0) {
+    plot <- plot +
+      .geom_glydraw_residue(
+        data = alditol_marker,
+        alpha = alditol_marker$alpha,
+        fill = NA,
+        colour = "black",
+        linewidth = node_linewidth
+      )
+  }
+  plot
 }
 
 #' Add the appropriate text layers to a cartoon
@@ -799,7 +1000,8 @@ GeomGlydrawResidue <- ggplot2::ggproto(
 #' @param plot A ggplot object.
 #' @param annotation_data A list returned by `.cartoon_text_annotation_data()`.
 #' @param show_linkage A logical scalar. `TRUE` draws all text; `FALSE` draws
-#'   only substituent and custom reducing-end text when present.
+#'   only residue-center, substituent, and custom reducing-end text when
+#'   present.
 #' @param font_family Font family used for text annotations.
 #'
 #' @returns A ggplot object with zero or one added text layer.

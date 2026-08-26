@@ -1,3 +1,10 @@
+# glydraw 0.9.0
+
+* `draw_cartoon()` and all glycan-grob-based interfaces now identify alditols with a small hollow black circle inside the core residue and omit reducing-end lines and text regardless of `red_end` style options. (#90)
+* `draw_cartoon()` and all glycan-grob-based interfaces now place substituent annotations opposite adjacent Fuc-like branches, preventing labels from overlapping those residues in every drawing orientation. (#89)
+* `draw_cartoon()` and all glycan-grob-based interfaces now render furanose residues and unusual absolute configurations supported by `glyrepr` and `glyparse`, with centered `D`, `f`, or `Df` labels inside their natural SNFG glyphs. (#88)
+* `draw_cartoon()` and all glycan-grob-based interfaces now support floating glycan parts, including explicit and implicit attachment candidates; repeated identical parts are merged with a count such as `3x`. (#87)
+
 # glydraw 0.8.0
 
 ## Breaking changes
@@ -11,6 +18,7 @@
 ## New features
 
 * `anno_glycan()` uses glycan cartoons as row or column labels in ComplexHeatmap heatmaps, with clustering-aware ordering and the sizing, anchoring, rotation, nudging, and styling controls of glycan axis scales. (#67)
+* `draw_cartoon()` now draws normalized floating glycan parts from glyrepr and glyparse, using one SNFG bracket for either explicit or implicit attachment candidates. Repeated identical floating cartoons are merged with a count such as `3x`. (#87)
 * `draw_cartoon_sketch()` draws hand-sketched glycan cartoons with reproducible rough strokes, patterned residue fills, optional drawing media, and the same layout, annotation, orientation, highlighting, styling, sizing, and saving behavior as `draw_cartoon()`. Sketch cartoons always use their handwriting font, ignoring `font_family` in style presets. (#77, #81)
 * `font_family` style option controls the font used for text annotations across glycan cartoons, including alpha and beta anomer labels. (#69)
 * `geom_glycan()` and `geom_node_glycan()` gain an `alpha` aesthetic. Each cartoon is composited before transparency is applied so nodes continue to occlude the linkage edges beneath them. Graphics devices without alpha-mask and transformation support throw an error for non-opaque values rather than render an inaccurate cartoon. (#85)

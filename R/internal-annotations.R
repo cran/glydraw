@@ -220,7 +220,9 @@
   orient <- rlang::arg_match(orient)
   base_offset <- 0.4
   diagonal_hexnac_offset <- 0.45
-  mono <- igraph::V(structure)[[anchor_ver]]$mono
+  mono <- .base_residue_monosaccharide(
+    igraph::V(structure)[[anchor_ver]]$mono
+  )
   glycoform <- glycan_dict[[mono]][[1]]
   needs_extra_offset <- .needs_diagonal_hexnac_offset(
     anchor_x,
@@ -296,74 +298,36 @@
   structure,
   coor,
   node_size = 1,
-  orient = c("left", "right", "up", "down")
+  orient = c("left", "right", "up", "down"),
+  visible_vertices = seq_len(length(structure))
 ) {
   if (igraph::ecount(structure) == 0) {
     return(.empty_linkage_annotation_data())
   }
   orient <- rlang::arg_match(orient)
 
-  child_vertices <- seq_len(length(structure) - 1)
-  parent_vertices <- .parent_vertices_for_annotations(structure)
-  linkage_labels <- strsplit(
-    igraph::E(structure)$linkage[child_vertices],
-    "-",
-    fixed = TRUE
-  )
-  row_count <- 2L * length(child_vertices)
-  annotation <- data.frame(
-    vertice = rep(as.character(child_vertices), each = 2L),
-    annot = character(row_count),
-    x = numeric(row_count),
-    y = numeric(row_count),
-    segment_start_x = numeric(row_count),
-    segment_start_y = numeric(row_count),
-    segment_end_x = numeric(row_count),
-    segment_end_y = numeric(row_count),
-    stringsAsFactors = FALSE
-  )
-
-  for (ver in child_vertices) {
-    par_ver <- parent_vertices[[ver]]
-    offsets <- .linkage_label_offsets(
-      structure,
-      coor,
-      child_ver = ver,
-      parent_ver = par_ver,
-      orient = orient
-    )
-    label_positions <- .linkage_label_positions(
-      coor[ver, "x"],
-      coor[ver, "y"],
-      coor[par_ver, "x"],
-      coor[par_ver, "y"],
-      chil_offset = offsets[["child"]],
-      par_offset = offsets[["parent"]],
-      chil_perpendicular_nudge = .beta_perpendicular_nudge_for_linkage(
-        linkage_labels[[ver]][[1]],
-        coor[ver, "x"],
-        coor[par_ver, "x"]
-      ),
-      node_size = node_size
-    )
-    rows <- 2L * ver - c(1L, 0L)
-    annotation$annot[rows] <- linkage_labels[[ver]][1:2]
-    annotation$x[rows] <- c(
-      label_positions$chil[[1]] + coor[ver, "x"],
-      label_positions$par[[1]] + coor[par_ver, "x"]
-    )
-    annotation$y[rows] <- c(
-      label_positions$chil[[2]] + coor[ver, "y"],
-      label_positions$par[[2]] + coor[par_ver, "y"]
-    )
-    annotation$segment_start_x[rows] <- coor[ver, "x"]
-    annotation$segment_start_y[rows] <- coor[ver, "y"]
-    annotation$segment_end_x[rows] <- coor[par_ver, "x"]
-    annotation$segment_end_y[rows] <- coor[par_ver, "y"]
+  edges <- igraph::as_edgelist(structure, names = FALSE)
+  visible_edges <- edges[, 1] %in%
+    visible_vertices &
+    edges[, 2] %in% visible_vertices
+  child_vertices <- edges[visible_edges, 2]
+  child_vertices <- sort(as.integer(child_vertices))
+  if (length(child_vertices) == 0) {
+    return(.empty_linkage_annotation_data())
   }
 
-  annotation$annot <- .normalize_linkage_labels(annotation$annot)
-  annotation
+  purrr::map_dfr(
+    child_vertices,
+    \(.vertex) {
+      .linkage_annotation_rows(
+        structure,
+        coor,
+        .vertex,
+        node_size,
+        orient
+      )
+    }
+  )
 }
 
 #' Build an empty linkage annotation table
@@ -409,8 +373,20 @@
   orient = c("left", "right", "up", "down")
 ) {
   orient <- rlang::arg_match(orient)
-  par_ver <- .parent_vertex_for_annotation(structure, ver)
-  labels <- strsplit(igraph::E(structure)[ver]$linkage, '-')[[1]]
+  parent_edge <- as.integer(igraph::incident(structure, ver, mode = "in"))
+  if (length(parent_edge) != 1) {
+    cli::cli_abort(
+      "A linkage annotation child must have exactly one parent edge."
+    )
+  }
+  endpoints <- igraph::ends(structure, parent_edge, names = FALSE)
+  par_ver <- as.integer(endpoints[[1, 1]])
+  labels <- strsplit(
+    igraph::E(structure)[parent_edge]$linkage,
+    "-",
+    fixed = TRUE
+  )[[1]]
+  labels <- .normalize_linkage_labels(labels)
   offsets <- .linkage_label_offsets(
     structure,
     coor,
@@ -449,6 +425,90 @@
       segment_end = coor[par_ver, ]
     )
   )
+}
+
+.floating_linkage_annotation_data <- function(
+  structure,
+  coor,
+  orient = c("left", "right", "up", "down"),
+  floating = NULL,
+  node_size = 1
+) {
+  if (is.null(floating)) {
+    return(.empty_linkage_annotation_data())
+  }
+  orient <- rlang::arg_match(orient)
+
+  purrr::map_dfr(floating$groups, function(group) {
+    segment <- group$segment[1, ]
+    labels <- strsplit(group$linkage, "-", fixed = TRUE)[[1]]
+    labels <- .normalize_linkage_labels(labels)
+    offsets <- c(
+      child = .linkage_label_offset(
+        structure,
+        group$root,
+        segment$start_x,
+        segment$start_y,
+        segment$end_x,
+        segment$end_y,
+        role = "child",
+        orient = orient
+      ),
+      parent = 0.4
+    )
+    label_positions <- .linkage_label_positions(
+      segment$start_x,
+      segment$start_y,
+      segment$end_x,
+      segment$end_y,
+      chil_offset = offsets[["child"]],
+      par_offset = offsets[["parent"]],
+      node_size = node_size
+    )
+
+    dplyr::bind_rows(
+      .linkage_annotation_row(
+        ver = group$root,
+        annot = labels[[1]],
+        annot_coor = as.vector(label_positions$chil) +
+          c(x = segment$start_x, y = segment$start_y),
+        segment_start = c(x = segment$start_x, y = segment$start_y),
+        segment_end = c(x = segment$end_x, y = segment$end_y)
+      ),
+      .linkage_annotation_row(
+        ver = group$root,
+        annot = labels[[2]],
+        annot_coor = as.vector(label_positions$par) +
+          c(x = segment$end_x, y = segment$end_y),
+        segment_start = c(x = segment$start_x, y = segment$start_y),
+        segment_end = c(x = segment$end_x, y = segment$end_y)
+      )
+    )
+  })
+}
+
+.floating_count_annotation_data <- function(floating = NULL) {
+  if (is.null(floating)) {
+    return(.empty_linkage_annotation_data())
+  }
+  repeated <- Filter(\(.group) .group$count > 1, floating$groups)
+  if (length(repeated) == 0) {
+    return(.empty_linkage_annotation_data())
+  }
+
+  purrr::map_dfr(repeated, function(group) {
+    data.frame(
+      vertice = as.character(group$root),
+      annot = paste0(group$count, "x"),
+      x = group$count_x,
+      y = group$count_y,
+      segment_start_x = NA_real_,
+      segment_start_y = NA_real_,
+      segment_end_x = NA_real_,
+      segment_end_y = NA_real_,
+      stringsAsFactors = FALSE
+    )
+  })
 }
 
 #' Find the parent vertex used for linkage annotations
@@ -1000,6 +1060,95 @@
   annotation
 }
 
+#' Offset center labels to the visual center of directional residue glyphs
+#'
+#' @param glycoform A character vector of rendered glycoform names.
+#' @param node_size Numeric node-size multiplier used to scale residue glyphs.
+#'
+#' @returns A numeric matrix with columns `x` and `y`, containing one offset
+#'   row per glycoform.
+#' @noRd
+.residue_center_glyph_offset <- function(glycoform, node_size = 1) {
+  triangle_centroids <- rbind(
+    dHex = c(x = 0, y = -1 / 3),
+    dHexUp = c(x = 0, y = 1 / 3),
+    dHexRight = c(x = -1 / 3, y = 0),
+    dHexLeft = c(x = 1 / 3, y = 0)
+  )
+  composition <- vapply(
+    glycoform,
+    function(name) glycan_dict[[name]][[1]],
+    character(1)
+  )
+  centroid_pos <- match(composition, rownames(triangle_centroids))
+  has_offset <- !is.na(centroid_pos)
+  offset <- matrix(
+    0,
+    nrow = length(glycoform),
+    ncol = 2,
+    dimnames = list(NULL, c("x", "y"))
+  )
+  offset[has_offset, ] <- triangle_centroids[
+    centroid_pos[has_offset],
+    ,
+    drop = FALSE
+  ] *
+    .default_node_point_size *
+    node_size
+  offset
+}
+
+#' Build center labels for unusual configurations and furanose rings
+#'
+#' @param structure An igraph glycan graph whose vertices include `mono`.
+#' @param coor A numeric coordinate matrix with columns `x` and `y`, one row
+#'   per graph vertex.
+#' @param node_size Numeric node-size multiplier used to scale center text with
+#'   its residue glyph.
+#' @param fuc_orient Orientation strategy for Fuc-like triangles, either
+#'   `"flex"` or `"up"`.
+#'
+#' @returns A data frame with one centered annotation row for every residue
+#'   needing an explicit configuration or furanose label.
+#' @noRd
+.residue_center_annotation_data <- function(
+  structure,
+  coor,
+  node_size = 1,
+  fuc_orient = c("flex", "up")
+) {
+  fuc_orient <- rlang::arg_match(fuc_orient)
+  label <- .residue_center_label(igraph::V(structure)$mono)
+  label_pos <- which(!is.na(label) & nzchar(label))
+  if (length(label_pos) == 0) {
+    return(data.frame(
+      vertice = character(),
+      annot = character(),
+      x = numeric(),
+      y = numeric(),
+      hjust = numeric(),
+      vjust = numeric(),
+      text_size = numeric(),
+      stringsAsFactors = FALSE
+    ))
+  }
+  glycoform <- .residue_glycoforms(structure, coor, fuc_orient)[label_pos]
+  offset <- .residue_center_glyph_offset(glycoform, node_size)
+  data.frame(
+    vertice = as.character(label_pos),
+    annot = label[label_pos],
+    x = as.numeric(coor[label_pos, "x"] + offset[, "x"]),
+    y = as.numeric(coor[label_pos, "y"] + offset[, "y"]),
+    hjust = rep(0.5, length(label_pos)),
+    vjust = rep(0.5, length(label_pos)),
+    text_size = rep(
+      .residue_center_text_size * node_size,
+      length(label_pos)
+    ),
+    stringsAsFactors = FALSE
+  )
+}
+
 #' Build substituent annotation rows
 #'
 #' @param structure An igraph glycan graph whose vertices may include `sub`.
@@ -1012,8 +1161,10 @@
 #'
 #' @returns A data frame with columns `vertice`, `annot`, `x`, `y`, `hjust`,
 #'   and `vjust`. Unknown linkage prefixes such as `?` are removed from
-#'   `annot`. Returns an empty data frame with the same columns when no
-#'   substituents are present.
+#'   `annot`. Labels move to the opposite side of their residue when an
+#'   adjacent Fuc-like residue occupies the default annotation direction.
+#'   Returns an empty data frame with the same columns when no substituents are
+#'   present.
 #' @noRd
 .substituent_annotation_data <- function(
   structure,
@@ -1047,30 +1198,48 @@
   }
 
   offset_distance <- .scaled_annotation_offset(0.28, node_size)
-  offset <- .rotate_cartoon_vector(
+  default_offset <- .rotate_cartoon_vector(
     c(x = 0, y = offset_distance),
     orient
   )
-  hjust <- if (offset[["x"]] > 0) {
-    0
-  } else if (offset[["x"]] < 0) {
-    1
-  } else {
-    0.5
-  }
-  vjust <- if (offset[["y"]] > 0) {
-    0
-  } else if (offset[["y"]] < 0) {
-    1
-  } else {
-    0.5
-  }
+  offsets <- t(vapply(
+    sub_pos,
+    function(pos) {
+      neighbors <- as.integer(igraph::neighbors(structure, pos, mode = "all"))
+      fuc_like <- neighbors[
+        .is_fucose_like_layout_monosaccharide(
+          igraph::V(structure)[neighbors]$mono
+        )
+      ]
+      if (length(fuc_like) == 0) {
+        return(default_offset)
+      }
+
+      branch_vectors <- sweep(
+        coor[fuc_like, , drop = FALSE],
+        2,
+        coor[pos, ],
+        "-"
+      )
+      branch_projection <- as.vector(branch_vectors %*% default_offset)
+      occupies_default_side <- branch_projection > 0
+      if (any(occupies_default_side)) -default_offset else default_offset
+    },
+    numeric(2)
+  ))
+  colnames(offsets) <- c("x", "y")
+  hjust <- unname(
+    ifelse(offsets[, "x"] > 0, 0, ifelse(offsets[, "x"] < 0, 1, 0.5))
+  )
+  vjust <- unname(
+    ifelse(offsets[, "y"] > 0, 0, ifelse(offsets[, "y"] < 0, 1, 0.5))
+  )
 
   data.frame(
     vertice = as.character(sub_pos),
     annot = sub("^\\?+", "", sub[sub_pos]),
-    x = as.numeric(coor[sub_pos, "x"] + offset["x"]),
-    y = as.numeric(coor[sub_pos, "y"] + offset["y"]),
+    x = as.numeric(coor[sub_pos, "x"] + offsets[, "x"]),
+    y = as.numeric(coor[sub_pos, "y"] + offsets[, "y"]),
     hjust = hjust,
     vjust = vjust,
     stringsAsFactors = FALSE
@@ -1081,8 +1250,8 @@
 #'
 #' @param annotation A substituent annotation data frame returned by
 #'   `.substituent_annotation_data()`.
-#' @param orient Drawing orientation, one of `"left"`, `"right"`, `"up"`, or
-#'   `"down"`.
+#' @param orient Drawing orientation. Retained for internal call compatibility;
+#'   actual bound directions are derived from each annotation's justification.
 #'
 #' @returns A data frame with numeric columns `x` and `y`. Horizontal labels
 #'   return top bound points; vertical labels return right-side bound points.
@@ -1096,12 +1265,21 @@
     return(data.frame(x = numeric(0), y = numeric(0)))
   }
 
-  direction <- .rotate_cartoon_vector(c(x = 0, y = 1), orient)
+  direction_x <- ifelse(
+    annotation$hjust == 0,
+    1,
+    ifelse(annotation$hjust == 1, -1, 0)
+  )
+  direction_y <- ifelse(
+    annotation$vjust == 0,
+    1,
+    ifelse(annotation$vjust == 1, -1, 0)
+  )
   data.frame(
     x = annotation$x +
-      direction[["x"]] * .substituent_label_width(annotation$annot),
+      direction_x * .substituent_label_width(annotation$annot),
     y = annotation$y +
-      direction[["y"]] * .substituent_label_height(annotation$annot)
+      direction_y * .substituent_label_height(annotation$annot)
   )
 }
 
@@ -1147,6 +1325,28 @@
 #' @noRd
 .quote_plotmath_text <- function(annot) {
   encodeString(annot, quote = '"')
+}
+
+#' Format residue-center labels as plotmath
+#'
+#' @param label A character vector returned by `.residue_center_label()`.
+#'
+#' @returns Plotmath strings with configuration letters upright and furanose
+#'   markers italicized.
+#' @noRd
+.residue_center_plotmath_label <- function(label) {
+  has_furanose_marker <- endsWith(label, "f")
+  configuration <- sub("f$", "", label)
+  italic_f <- 'italic("f")'
+  ifelse(
+    has_furanose_marker & nzchar(configuration),
+    paste0(.quote_plotmath_text(configuration), "*", italic_f),
+    ifelse(
+      has_furanose_marker,
+      italic_f,
+      .quote_plotmath_text(configuration)
+    )
+  )
 }
 
 # Recover plain text previously stored for plotmath parsing.
@@ -1417,7 +1617,7 @@
 #' @param red_end A string. `""` draws only the current reducing-end line,
 #'   `"~"` draws a wavy end, a string with one `<site>` tag draws an amino-acid
 #'   sequence, and any other string draws custom text. Ignored when
-#'   `red_end_length` is `0`.
+#'   `red_end_length` is `0`. Alditols ignore all reducing-end arguments.
 #' @param red_end_length Length of the reducing-end line in plot coordinate
 #'   units. At `0`, the line and all `red_end` decorations are omitted while
 #'   the core anomer annotation remains.
@@ -1441,6 +1641,9 @@
 ) {
   orient <- rlang::arg_match(orient)
   checkmate::assert_string(red_end, na.ok = FALSE)
+  if (.is_alditol_structure(structure)) {
+    return(.empty_reducing_end_annotation_data())
+  }
   anomer <- igraph::graph_attr(structure, "anomer")
   if (.has_no_reducing_end_anomer(anomer)) {
     return(.empty_reducing_end_annotation_data())
