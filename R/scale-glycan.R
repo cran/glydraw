@@ -20,8 +20,9 @@
 #' @param sec.axis A secondary axis specification.
 #' @param continuous.limits Continuous limits used to position the discrete
 #'   scale.
-#' @param size Positive scalar that uniformly scales each axis-label cartoon.
-#'   Defaults to `0.4`.
+#' @param size Whole-cartoon sizing. The default, [auto_glycan_size()], fits
+#'   labels to the available axis space. A positive number uses a fixed scale
+#'   multiplier.
 #' @param angle Rotation in degrees applied to each axis-label cartoon,
 #'   independently of the cartoon orientation. Defaults to `0`.
 #' @param orient Glycan drawing orientation. `NULL`, the default, selects the
@@ -73,7 +74,7 @@ scale_x_glycan <- function(
   position = "bottom",
   sec.axis = ggplot2::waiver(),
   continuous.limits = NULL,
-  size = 0.4,
+  size = auto_glycan_size(),
   angle = 0,
   hjust = hjust_red_end(),
   vjust = 0,
@@ -110,6 +111,7 @@ scale_x_glycan <- function(
     red_end = red_end,
     red_end_length = style$red_end_length,
     red_end_size = style$red_end_size,
+    layout = style$layout,
     fuc_orient = style$fuc_orient,
     edge_linewidth = style$edge_linewidth,
     node_linewidth = style$node_linewidth,
@@ -142,7 +144,7 @@ scale_y_glycan <- function(
   position = "left",
   sec.axis = ggplot2::waiver(),
   continuous.limits = NULL,
-  size = 0.4,
+  size = auto_glycan_size(),
   angle = 0,
   hjust = 1,
   vjust = vjust_red_end(),
@@ -179,6 +181,7 @@ scale_y_glycan <- function(
     red_end = red_end,
     red_end_length = style$red_end_length,
     red_end_size = style$red_end_size,
+    layout = style$layout,
     fuc_orient = style$fuc_orient,
     edge_linewidth = style$edge_linewidth,
     node_linewidth = style$node_linewidth,
@@ -244,6 +247,7 @@ scale_y_glycan <- function(
   red_end,
   red_end_length,
   red_end_size,
+  layout = "SNFG",
   fuc_orient,
   edge_linewidth,
   node_linewidth,
@@ -251,9 +255,10 @@ scale_y_glycan <- function(
   font_family,
   colors
 ) {
+  sizing <- .resolve_glycan_size(size, 0.4)
   options <- .validate_glycan_label_options(
     orient = orient,
-    size = size,
+    size = sizing$size,
     angle = angle,
     hjust = hjust,
     vjust = vjust,
@@ -263,6 +268,7 @@ scale_y_glycan <- function(
     red_end = red_end,
     red_end_length = red_end_length,
     red_end_size = red_end_size,
+    layout = layout,
     fuc_orient = fuc_orient,
     edge_linewidth = edge_linewidth,
     node_linewidth = node_linewidth,
@@ -284,6 +290,7 @@ scale_y_glycan <- function(
     glycan_hjust_auto = hjust_auto,
     glycan_vjust_auto = vjust_auto,
     glycan_size = options$size,
+    glycan_fit = sizing$fit,
     glycan_angle = options$angle,
     glycan_hjust = options$hjust,
     glycan_vjust = options$vjust,
@@ -293,6 +300,7 @@ scale_y_glycan <- function(
     glycan_red_end = options$red_end,
     glycan_red_end_length = options$red_end_length,
     glycan_red_end_size = options$red_end_size,
+    glycan_layout = options$layout,
     glycan_fuc_orient = options$fuc_orient,
     glycan_edge_linewidth = options$edge_linewidth,
     glycan_node_linewidth = options$node_linewidth,
@@ -405,6 +413,7 @@ scale_y_glycan <- function(
   red_end,
   red_end_length,
   red_end_size,
+  layout = "SNFG",
   fuc_orient,
   edge_linewidth,
   node_linewidth,
@@ -428,6 +437,7 @@ scale_y_glycan <- function(
   checkmate::assert_string(font_family, na.ok = FALSE)
   .validate_node_size(node_size)
   colors <- .validate_colors(colors)
+  checkmate::assert_choice(layout, c("SNFG", "linear"))
   fuc_orient <- rlang::arg_match(fuc_orient, c("flex", "up"))
   show_linkage <- .resolve_linkage_visibility(show_linkage, node_size)
 
@@ -443,6 +453,7 @@ scale_y_glycan <- function(
     red_end = red_end,
     red_end_length = red_end_length,
     red_end_size = red_end_size,
+    layout = layout,
     fuc_orient = fuc_orient,
     edge_linewidth = edge_linewidth,
     node_linewidth = node_linewidth,
@@ -476,10 +487,16 @@ scale_y_glycan <- function(
     .new_glycan_axis_label,
     params = params
   )
+  if (params$glycan_fit) {
+    children <- .fit_glycan_label_size(children, params$vertical)
+  }
 
   list(
     grid::gTree(
       children = rlang::exec(grid::gList, !!!children),
+      glydraw_fit = params$glycan_fit,
+      glydraw_positions = positions,
+      glydraw_vertical = params$vertical,
       cl = "glycan_axis_labels"
     )
   )
@@ -517,6 +534,7 @@ scale_y_glycan <- function(
     orient = params$glycan_orient,
     style = style_glydraw(
       red_end = params$glycan_red_end,
+      layout = params$glycan_layout,
       fuc_orient = params$glycan_fuc_orient,
       edge_linewidth = params$glycan_edge_linewidth,
       node_linewidth = params$glycan_node_linewidth,
@@ -758,6 +776,7 @@ GuideGlycanAxis <- ggplot2::ggproto(
       glycan_hjust_auto = FALSE,
       glycan_vjust_auto = FALSE,
       glycan_size = 0.4,
+      glycan_fit = TRUE,
       glycan_angle = 0,
       glycan_hjust = 0.5,
       glycan_vjust = 0.5,
@@ -767,6 +786,7 @@ GuideGlycanAxis <- ggplot2::ggproto(
       glycan_red_end = "",
       glycan_red_end_length = 0.6,
       glycan_red_end_size = 6,
+      glycan_layout = "SNFG",
       glycan_fuc_orient = "flex",
       glycan_edge_linewidth = 0.8,
       glycan_node_linewidth = 0.8,

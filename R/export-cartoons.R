@@ -7,7 +7,7 @@
 #'   [glyparse::auto_parse()].
 #' @param dirname Directory name to save the cartoons. If it does not exist,
 #'   it is created.
-#' @param ... Ignored.
+#' @param ... Must be empty. Unused arguments raise an error.
 #' @param file_ext File extension supported by [ggplot2::ggsave()]. Defaults to "png".
 #' @param dpi Deprecated and ignored. Use `scale` to change the output size.
 #' @param scale Numeric output-size multiplier passed to [save_cartoon()].
@@ -64,6 +64,7 @@ export_cartoons.character <- function(
   style = style_glydraw(),
   red_end = NULL
 ) {
+  rlang::check_dots_empty()
   .export_cartoon_list(
     unique(.as_glycan_structure_input(x)),
     dirname,
@@ -89,6 +90,7 @@ export_cartoons.glyrepr_structure <- function(
   style = style_glydraw(),
   red_end = NULL
 ) {
+  rlang::check_dots_empty()
   .export_cartoon_list(
     unique(x),
     dirname,
@@ -146,5 +148,10 @@ export_cartoons.glyrepr_structure <- function(
   safe_names <- fs::path_sanitize(as.character(glycans), replacement = "_")
   safe_names <- ifelse(nchar(safe_names) == 0, "glycan", safe_names)
   safe_names <- substr(safe_names, 1, 180)
-  make.unique(safe_names, sep = "_")
+  # Reserve names case-insensitively so distinct cartoons cannot overwrite
+  # each other on Windows and other case-insensitive filesystems.
+  folded_names <- tolower(safe_names)
+  unique_names <- make.unique(folded_names, sep = "_")
+  suffixes <- substring(unique_names, nchar(folded_names) + 1L)
+  paste0(safe_names, suffixes)
 }

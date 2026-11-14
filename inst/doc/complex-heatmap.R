@@ -34,7 +34,6 @@ Heatmap(
     glycan = anno_glycan(
       structures,
       which = "row",
-      size = 0.2,
       show_linkage = FALSE
     )
   )
@@ -56,7 +55,6 @@ Heatmap(
       structures,
       which = "column",
       side = "top",
-      size = 0.2,
       show_linkage = FALSE
     )
   )

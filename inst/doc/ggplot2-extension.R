@@ -22,7 +22,7 @@ ggplot(plot_data, aes(glycan, value)) +
   geom_glycan(
     aes(structure = glycan),  # provide a `structure` aesthetic
     orient = "up",             # set orientation to vertical
-    size = 0.5,               # default 1 is too large
+    size = auto_glycan_size(), # fit to the available panel space (the default)
     vjust = 0,                # aligned to bottom
     position = position_nudge(y = 0.1)
   ) +
@@ -99,7 +99,6 @@ ggplot(plot_data, aes(branch, sample)) +
   # ===== Important Here =====
   scale_x_glycan(
     position = "top",
-    size = 0.2,
     show_linkage = FALSE,
     style = style_glydraw(red_end = "~")
   ) +
